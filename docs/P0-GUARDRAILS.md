@@ -1,0 +1,32 @@
+# Proteções P0
+
+As falhas eliminatórias abaixo são bloqueadores permanentes para a entrega. Uma
+fase não poderá ser considerada concluída se enfraquecer alguma dessas garantias
+ou não apresentar um teste confiável para o comportamento introduzido.
+
+| P0   | Falha eliminatória                                 | Bloqueio de implementação                                                                                | Evidência obrigatória                                              |
+| ---- | -------------------------------------------------- | -------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
+| P0-1 | Dinheiro representado por ponto flutuante          | Strings decimais nas fronteiras, `decimal.js` no domínio e mapeamento exato para `NUMERIC` no PostgreSQL | Testes unitários de Money e round trips de persistência            |
+| P0-2 | Saldo negativo causado por race condition          | Coordenação no banco por wallet e constraint de saldo não negativo no schema                             | Cenário real e paralelo de disputa por saldo insuficiente          |
+| P0-3 | Débito ou crédito duplicado                        | Identidade persistente do comando, constraints de unicidade e um único efeito no ledger por transação    | 50 apostas duplicadas concorrentes e testes de redelivery          |
+| P0-4 | Idempotência apenas em memória                     | Resultado idempotente e hash do payload persistidos no PostgreSQL                                        | Testes de replay após reinício e entre múltiplos processos         |
+| P0-5 | Correção limitada a uma instância                  | Nenhuma garantia depende da memória do processo; o PostgreSQL é o ponto de coordenação                   | Pelo menos três processos concorrentes                             |
+| P0-6 | Publicação de evento antes do commit               | Outbox transacional incluída junto à alteração financeira                                                | Recuperação após queda entre o commit e a publicação               |
+| P0-7 | Ausência de ledger auditável                       | Ledger somente de inclusão, imutabilidade no schema e escritas atômicas de wallet e ledger               | Testes de constraints e reconciliação após cada cenário financeiro |
+| P0-8 | PostgreSQL e SQS totalmente substituídos por mocks | Suítes de integração executadas contra serviços reais em containers                                      | Suíte local e de CI com containers, falhas e recuperação           |
+
+## Bloqueio por fase
+
+Antes de integrar uma fase de desenvolvimento:
+
+1. reler as seções relevantes de `docs/CHALLENGE.md`;
+2. identificar quais garantias P0 são afetadas pela alteração;
+3. adicionar ou atualizar as proteções no schema quando aplicável;
+4. implementar o teste útil de menor nível e a comprovação necessária com
+   infraestrutura real;
+5. executar toda a suíte de verificação existente;
+6. atualizar `docs/ACCEPTANCE-CRITERIA.md` sem declarar como comprovado um
+   comportamento ainda não testado.
+
+Funcionalidades opcionais não poderão ser iniciadas enquanto existir um defeito
+P0 conhecido.

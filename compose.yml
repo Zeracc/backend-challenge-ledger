@@ -1,0 +1,66 @@
+name: backend-challenge-ledger
+
+services:
+  postgres:
+    image: postgres:17.11-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-wagering}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-wagering}
+      POSTGRES_USER: ${POSTGRES_USER:-wagering}
+    ports:
+      - '127.0.0.1:${POSTGRES_PORT:-55432}:5432'
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}']
+      interval: 2s
+      timeout: 3s
+      retries: 15
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+
+  localstack:
+    # 4.8.1 keeps local SQS available without requiring a LocalStack account token.
+    image: localstack/localstack:4.8.1
+    environment:
+      AWS_DEFAULT_REGION: ${AWS_REGION:-us-east-1}
+      DEBUG: ${LOCALSTACK_DEBUG:-0}
+      SERVICES: sqs
+    ports:
+      - '127.0.0.1:4566:4566'
+    healthcheck:
+      test: ['CMD-SHELL', 'awslocal sqs list-queues >/dev/null 2>&1']
+      interval: 3s
+      timeout: 5s
+      retries: 20
+    volumes:
+      - ./docker/localstack/init-queues.sh:/etc/localstack/init/ready.d/init-queues.sh:ro
+      - localstack-data:/var/lib/localstack
+
+  api:
+    build:
+      context: .
+      target: runtime
+    environment:
+      APP_PORT: 3000
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-test}
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-test}
+      NODE_ENV: production
+      POSTGRES_DB: ${POSTGRES_DB:-wagering}
+      POSTGRES_HOST: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-wagering}
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: ${POSTGRES_USER:-wagering}
+      SQS_ENDPOINT: http://localstack:4566
+    depends_on:
+      localstack:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    ports:
+      - '127.0.0.1:${APP_PORT:-3000}:3000'
+    init: true
+    stop_grace_period: 20s
+
+volumes:
+  localstack-data:
+  postgres-data:

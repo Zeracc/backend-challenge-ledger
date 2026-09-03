@@ -1,0 +1,5 @@
+bun.lock
+coverage
+dist
+docs/CHALLENGE.md
+node_modules

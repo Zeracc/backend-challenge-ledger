@@ -1,0 +1,22 @@
+# Dependencies
+node_modules/
+
+# Build and test output
+coverage/
+dist/
+reports/
+
+# Environment and local state
+.env
+.env.*
+!.env.example
+*.log
+
+# Editors and operating systems
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# TypeScript
+*.tsbuildinfo
