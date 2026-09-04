@@ -5,16 +5,17 @@ import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import type { MikroORM, PostgreSqlConnection } from '@mikro-orm/postgresql';
 
 import {
-  ProcessBetUseCase,
-  type ProcessBetInput,
-} from '../../src/modules/wallet/application/use-cases/process-bet.js';
+  ProcessWagerTransactionUseCase,
+  type ProcessWagerTransactionInput,
+} from '../../src/modules/wallet/application/use-cases/process-wager-transaction.js';
 import { OpenWalletUseCase } from '../../src/modules/wallet/application/use-cases/open-wallet.js';
 import {
   WagerFailureCode,
+  WagerTransactionKind,
   WagerTransactionStatus,
 } from '../../src/modules/wallet/domain/entities/wager-transaction.js';
 import { IdempotencyConflictError } from '../../src/modules/wallet/domain/errors/wallet.errors.js';
-import { MikroOrmBetTransactionProcessor } from '../../src/modules/wallet/infrastructure/persistence/mikro-orm/bet-transaction.processor.js';
+import { MikroOrmWagerTransactionProcessor } from '../../src/modules/wallet/infrastructure/persistence/mikro-orm/wager-transaction.processor.js';
 import { MikroOrmWalletOpeningRepository } from '../../src/modules/wallet/infrastructure/persistence/mikro-orm/wallet-opening.repository.js';
 import type { IdGenerator } from '../../src/shared/application/ports/id-generator.js';
 import { SystemClock } from '../../src/shared/infrastructure/system/system-clock.js';
@@ -303,16 +304,18 @@ async function openWallet(
 function createBetUseCase(
   instance: MikroORM,
   idGenerator: IdGenerator = new UuidGenerator(),
-): ProcessBetUseCase {
-  return new ProcessBetUseCase(
-    new MikroOrmBetTransactionProcessor(instance.em.fork()),
+): ProcessWagerTransactionUseCase {
+  return new ProcessWagerTransactionUseCase(
+    new MikroOrmWagerTransactionProcessor(instance.em.fork()),
     idGenerator,
     new SystemClock(),
     new Sha256PayloadHasher(),
   );
 }
 
-async function threeIndependentUseCases(): Promise<ProcessBetUseCase[]> {
+async function threeIndependentUseCases(): Promise<
+  ProcessWagerTransactionUseCase[]
+> {
   const instances = await Promise.all([
     createWalletTestOrm(schemaName, false),
     createWalletTestOrm(schemaName, false),
@@ -324,9 +327,9 @@ async function threeIndependentUseCases(): Promise<ProcessBetUseCase[]> {
 }
 
 function requiredUseCase(
-  useCases: ProcessBetUseCase[],
+  useCases: ProcessWagerTransactionUseCase[],
   index: number,
-): ProcessBetUseCase {
+): ProcessWagerTransactionUseCase {
   const useCase = useCases[index % useCases.length];
 
   if (useCase === undefined) {
@@ -340,7 +343,7 @@ function betInput(
   walletId: string,
   playerId: string,
   amount: string,
-): ProcessBetInput {
+): ProcessWagerTransactionInput {
   const externalTransactionId = randomUUID();
 
   return {
@@ -351,6 +354,7 @@ function betInput(
     walletId,
     roundId: 'round-1',
     gameId: 'game-1',
+    kind: WagerTransactionKind.Bet,
     money: { amount, currency: 'BRL' },
   };
 }
@@ -444,19 +448,19 @@ interface WorkerResult {
 }
 
 async function runBetWorker(
-  input: ProcessBetInput,
+  input: ProcessWagerTransactionInput,
   attempts: number,
 ): Promise<WorkerResult[]> {
   const workerPath = fileURLToPath(
-    new URL('./fixtures/bet-process-worker.ts', import.meta.url),
+    new URL('./fixtures/wager-process-worker.ts', import.meta.url),
   );
   const child = Bun.spawn([process.execPath, workerPath], {
     cwd: process.cwd(),
     env: {
       ...process.env,
-      BET_WORKER_SCHEMA: schemaName,
-      BET_WORKER_INPUT: JSON.stringify(input),
-      BET_WORKER_ATTEMPTS: attempts.toString(),
+      WAGER_WORKER_SCHEMA: schemaName,
+      WAGER_WORKER_INPUT: JSON.stringify(input),
+      WAGER_WORKER_ATTEMPTS: attempts.toString(),
     },
     stdout: 'pipe',
     stderr: 'pipe',

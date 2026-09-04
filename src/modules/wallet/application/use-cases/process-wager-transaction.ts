@@ -1,14 +1,23 @@
 import type { Clock } from '../../../../shared/application/ports/clock.js';
 import type { IdGenerator } from '../../../../shared/application/ports/id-generator.js';
 import type { PayloadHasher } from '../../../../shared/application/ports/payload-hasher.js';
-import { WagerTransaction } from '../../domain/entities/wager-transaction.js';
+import {
+  WagerTransaction,
+  WagerTransactionKind,
+  type CreateExternalTransactionProps,
+} from '../../domain/entities/wager-transaction.js';
 import { Money, type MoneyProps } from '../../domain/value-objects/money.js';
 import type {
-  BetTransactionProcessor,
-  ProcessBetResult,
-} from '../ports/bet-transaction.processor.js';
+  ProcessWagerTransactionResult,
+  WagerTransactionProcessor,
+} from '../ports/wager-transaction.processor.js';
 
-export interface ProcessBetInput {
+export type ProcessableWagerTransactionKind =
+  | WagerTransactionKind.Bet
+  | WagerTransactionKind.Win
+  | WagerTransactionKind.Loss;
+
+export interface ProcessWagerTransactionInput {
   idempotencyKey: string;
   providerId: string;
   externalTransactionId: string;
@@ -16,20 +25,23 @@ export interface ProcessBetInput {
   walletId: string;
   roundId: string;
   gameId: string;
+  kind: ProcessableWagerTransactionKind;
   money: MoneyProps;
 }
 
-export type ProcessBetOutput = ProcessBetResult;
+export type ProcessWagerTransactionOutput = ProcessWagerTransactionResult;
 
-export class ProcessBetUseCase {
+export class ProcessWagerTransactionUseCase {
   public constructor(
-    private readonly processor: BetTransactionProcessor,
+    private readonly processor: WagerTransactionProcessor,
     private readonly idGenerator: IdGenerator,
     private readonly clock: Clock,
     private readonly payloadHasher: PayloadHasher,
   ) {}
 
-  public async execute(input: ProcessBetInput): Promise<ProcessBetOutput> {
+  public async execute(
+    input: ProcessWagerTransactionInput,
+  ): Promise<ProcessWagerTransactionOutput> {
     const money = Money.from(input.money);
     const occurredAt = this.clock.now();
     const payloadHash = this.payloadHasher.hash({
@@ -39,10 +51,10 @@ export class ProcessBetUseCase {
       walletId: input.walletId,
       roundId: input.roundId,
       gameId: input.gameId,
-      kind: 'BET',
+      kind: input.kind,
       money: money.toJSON(),
     });
-    const transaction = WagerTransaction.createBet({
+    const props: CreateExternalTransactionProps = {
       id: this.idGenerator.generate(),
       providerId: input.providerId,
       externalTransactionId: input.externalTransactionId,
@@ -54,7 +66,8 @@ export class ProcessBetUseCase {
       gameId: input.gameId,
       money,
       createdAt: occurredAt,
-    });
+    };
+    const transaction = createTransaction(input.kind, props);
 
     return this.processor.processAtomically({
       transaction,
@@ -64,5 +77,19 @@ export class ProcessBetUseCase {
       balanceChangedEventId: this.idGenerator.generate(),
       occurredAt,
     });
+  }
+}
+
+function createTransaction(
+  kind: ProcessableWagerTransactionKind,
+  props: CreateExternalTransactionProps,
+): WagerTransaction {
+  switch (kind) {
+    case WagerTransactionKind.Bet:
+      return WagerTransaction.createBet(props);
+    case WagerTransactionKind.Win:
+      return WagerTransaction.createWin(props);
+    case WagerTransactionKind.Loss:
+      return WagerTransaction.createLoss(props);
   }
 }

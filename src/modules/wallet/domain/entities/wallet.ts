@@ -1,5 +1,6 @@
 import {
   InsufficientWalletFundsError,
+  InvalidWalletCreditError,
   InvalidWalletDebitError,
   InvalidWalletIdentityError,
   NegativeInitialBalanceError,
@@ -100,6 +101,26 @@ export class Wallet {
       this.playerId,
       this.currency,
       this.currentBalance.subtract(money),
+      this.currentVersion + 1,
+      new Date(this.creationDate.getTime()),
+      new Date(updatedAt.getTime()),
+    );
+  }
+
+  public credit(money: Money, updatedAt: Date): Wallet {
+    if (this.currency !== money.currency) {
+      throw new WalletCurrencyMismatchError(this.currency, money.currency);
+    }
+
+    if (!money.isPositive()) {
+      throw new InvalidWalletCreditError();
+    }
+
+    return new Wallet(
+      this.id,
+      this.playerId,
+      this.currency,
+      this.currentBalance.add(money),
       this.currentVersion + 1,
       new Date(this.creationDate.getTime()),
       new Date(updatedAt.getTime()),

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'bun:test';
 
 import {
   InsufficientWalletFundsError,
+  InvalidWalletCreditError,
   InvalidWalletDebitError,
   NegativeInitialBalanceError,
   WalletCurrencyMismatchError,
@@ -127,6 +128,55 @@ describe('Wallet', () => {
 
     expect(() => wallet.debit(Money.zero('BRL'), openedAt)).toThrow(
       InvalidWalletDebitError,
+    );
+    expect(wallet.version).toBe(1);
+    expect(wallet.balance.toString()).toBe('20.00');
+  });
+
+  it('credita o saldo em uma nova versão sem alterar a instância anterior', () => {
+    const wallet = Wallet.open({
+      id: 'wallet-id',
+      playerId: 'player-id',
+      initialBalance: Money.from({ amount: '100.00', currency: 'BRL' }),
+      openedAt,
+    });
+    const updatedAt = new Date('2026-09-04T12:02:00.000Z');
+
+    const credited = wallet.credit(
+      Money.from({ amount: '40.00', currency: 'BRL' }),
+      updatedAt,
+    );
+
+    expect(wallet.balance.toString()).toBe('100.00');
+    expect(wallet.version).toBe(1);
+    expect(credited.balance.toString()).toBe('140.00');
+    expect(credited.version).toBe(2);
+    expect(credited.updatedAt).toEqual(updatedAt);
+  });
+
+  it('rejeita crédito em moeda diferente da wallet', () => {
+    const wallet = Wallet.open({
+      id: 'wallet-id',
+      playerId: 'player-id',
+      initialBalance: Money.from({ amount: '20.00', currency: 'BRL' }),
+      openedAt,
+    });
+
+    expect(() =>
+      wallet.credit(Money.from({ amount: '1.00', currency: 'USD' }), openedAt),
+    ).toThrow(WalletCurrencyMismatchError);
+  });
+
+  it('rejeita crédito zero para não incrementar versão sem mudar saldo', () => {
+    const wallet = Wallet.open({
+      id: 'wallet-id',
+      playerId: 'player-id',
+      initialBalance: Money.from({ amount: '20.00', currency: 'BRL' }),
+      openedAt,
+    });
+
+    expect(() => wallet.credit(Money.zero('BRL'), openedAt)).toThrow(
+      InvalidWalletCreditError,
     );
     expect(wallet.version).toBe(1);
     expect(wallet.balance.toString()).toBe('20.00');

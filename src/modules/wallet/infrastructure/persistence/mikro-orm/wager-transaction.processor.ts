@@ -2,15 +2,17 @@ import { LockMode, UniqueConstraintViolationException } from '@mikro-orm/core';
 import type { EntityManager } from '@mikro-orm/postgresql';
 
 import type {
-  BetTransactionProcessor,
-  ProcessBetCommand,
-  ProcessBetResult,
-} from '../../../application/ports/bet-transaction.processor.js';
+  ProcessWagerTransactionCommand,
+  ProcessWagerTransactionResult,
+  WagerTransactionProcessor,
+} from '../../../application/ports/wager-transaction.processor.js';
 import {
   WagerFailureCode,
+  WagerTransactionKind,
   type WagerTransaction,
   type WagerTransactionStatus,
 } from '../../../domain/entities/wager-transaction.js';
+import type { Wallet } from '../../../domain/entities/wallet.js';
 import {
   LedgerDirection,
   WalletLedgerEntry,
@@ -34,12 +36,12 @@ import { WagerTransactionRecord } from './entities/wager-transaction.record.js';
 import { WalletLedgerEntryRecord } from './entities/wallet-ledger-entry.record.js';
 import { WalletRecord } from './entities/wallet.record.js';
 
-export class MikroOrmBetTransactionProcessor implements BetTransactionProcessor {
+export class MikroOrmWagerTransactionProcessor implements WagerTransactionProcessor {
   public constructor(private readonly entityManager: EntityManager) {}
 
   public async processAtomically(
-    command: ProcessBetCommand,
-  ): Promise<ProcessBetResult> {
+    command: ProcessWagerTransactionCommand,
+  ): Promise<ProcessWagerTransactionResult> {
     const external = requireExternalIdentity(command.transaction);
 
     try {
@@ -75,8 +77,8 @@ export class MikroOrmBetTransactionProcessor implements BetTransactionProcessor 
 
   private async processWithinTransaction(
     entityManager: EntityManager,
-    command: ProcessBetCommand,
-  ): Promise<ProcessBetResult> {
+    command: ProcessWagerTransactionCommand,
+  ): Promise<ProcessWagerTransactionResult> {
     const transaction = command.transaction;
     const external = requireExternalIdentity(transaction);
     const existingBeforeLock = await entityManager.findOne(
@@ -132,69 +134,57 @@ export class MikroOrmBetTransactionProcessor implements BetTransactionProcessor 
 
     const wallet = walletRecord.toDomain();
 
+    switch (transaction.kind) {
+      case WagerTransactionKind.Bet:
+        return this.processBet(
+          entityManager,
+          walletRecord,
+          wallet,
+          command,
+          external,
+        );
+      case WagerTransactionKind.Win:
+        return this.processBalanceChange(
+          entityManager,
+          walletRecord,
+          wallet,
+          wallet.credit(transaction.money, command.occurredAt),
+          LedgerDirection.Credit,
+          command,
+          external,
+        );
+      case WagerTransactionKind.Loss:
+        return this.processLoss(entityManager, wallet, command, external);
+      default:
+        throw new Error(
+          `O processador não suporta transações ${transaction.kind}.`,
+        );
+    }
+  }
+
+  private async processBet(
+    entityManager: EntityManager,
+    walletRecord: WalletRecord,
+    wallet: Wallet,
+    command: ProcessWagerTransactionCommand,
+    external: ExternalIdentity,
+  ): Promise<ProcessWagerTransactionResult> {
     try {
-      const debitedWallet = wallet.debit(transaction.money, command.occurredAt);
-      transaction.markProcessed(debitedWallet.balance, command.occurredAt);
-      walletRecord.apply(debitedWallet);
-
-      const ledgerEntry = WalletLedgerEntry.create({
-        id: command.ledgerEntryId,
-        walletId: wallet.id,
-        transactionId: transaction.id,
-        direction: LedgerDirection.Debit,
-        money: transaction.money,
-        balanceBefore: wallet.balance,
-        balanceAfter: debitedWallet.balance,
-        createdAt: command.occurredAt,
-      });
-      const processedEvent = new WagerTransactionProcessedEvent({
-        eventId: command.processedEventId,
-        aggregateId: transaction.id,
-        correlationId: transaction.id,
-        occurredAt: command.occurredAt,
-        data: {
-          transactionId: transaction.id,
-          walletId: wallet.id,
-          playerId: wallet.playerId,
-          providerId: external.providerId,
-          externalTransactionId: external.externalTransactionId,
-          kind: transaction.kind,
-          money: transaction.money.toJSON(),
-          balanceAfter: debitedWallet.balance.toJSON(),
-        },
-      });
-      const balanceEvent = new WalletBalanceChangedEvent({
-        eventId: command.balanceChangedEventId,
-        aggregateId: wallet.id,
-        correlationId: transaction.id,
-        occurredAt: command.occurredAt,
-        data: {
-          walletId: wallet.id,
-          playerId: wallet.playerId,
-          transactionId: transaction.id,
-          direction: ledgerEntry.direction,
-          money: ledgerEntry.money.toJSON(),
-          balanceBefore: ledgerEntry.balanceBefore.toJSON(),
-          balanceAfter: ledgerEntry.balanceAfter.toJSON(),
-          walletVersion: debitedWallet.version,
-        },
-      });
-
-      entityManager.persist(new WagerTransactionRecord(transaction));
-      await entityManager.flush();
-      entityManager.persist(new WalletLedgerEntryRecord(ledgerEntry));
-      entityManager.persist([
-        new OutboxMessageRecord(processedEvent),
-        new OutboxMessageRecord(balanceEvent),
-      ]);
-      await entityManager.flush();
-
-      return resultFromTransaction(transaction, false);
+      return await this.processBalanceChange(
+        entityManager,
+        walletRecord,
+        wallet,
+        wallet.debit(command.transaction.money, command.occurredAt),
+        LedgerDirection.Debit,
+        command,
+        external,
+      );
     } catch (error: unknown) {
       if (!(error instanceof InsufficientWalletFundsError)) {
         throw error;
       }
 
+      const transaction = command.transaction;
       transaction.reject(WagerFailureCode.InsufficientFunds, wallet.balance);
       const rejectedEvent = new WagerTransactionRejectedEvent({
         eventId: command.rejectedEventId,
@@ -222,10 +212,94 @@ export class MikroOrmBetTransactionProcessor implements BetTransactionProcessor 
     }
   }
 
+  private async processBalanceChange(
+    entityManager: EntityManager,
+    walletRecord: WalletRecord,
+    wallet: Wallet,
+    updatedWallet: Wallet,
+    direction: LedgerDirection,
+    command: ProcessWagerTransactionCommand,
+    external: ExternalIdentity,
+  ): Promise<ProcessWagerTransactionResult> {
+    const transaction = command.transaction;
+    transaction.markProcessed(updatedWallet.balance, command.occurredAt);
+    walletRecord.apply(updatedWallet);
+
+    const ledgerEntry = WalletLedgerEntry.create({
+      id: command.ledgerEntryId,
+      walletId: wallet.id,
+      transactionId: transaction.id,
+      direction,
+      money: transaction.money,
+      balanceBefore: wallet.balance,
+      balanceAfter: updatedWallet.balance,
+      createdAt: command.occurredAt,
+    });
+    const processedEvent = createProcessedEvent(
+      transaction,
+      wallet,
+      external,
+      command.processedEventId,
+      command.occurredAt,
+      updatedWallet.balance,
+    );
+    const balanceEvent = new WalletBalanceChangedEvent({
+      eventId: command.balanceChangedEventId,
+      aggregateId: wallet.id,
+      correlationId: transaction.id,
+      occurredAt: command.occurredAt,
+      data: {
+        walletId: wallet.id,
+        playerId: wallet.playerId,
+        transactionId: transaction.id,
+        direction: ledgerEntry.direction,
+        money: ledgerEntry.money.toJSON(),
+        balanceBefore: ledgerEntry.balanceBefore.toJSON(),
+        balanceAfter: ledgerEntry.balanceAfter.toJSON(),
+        walletVersion: updatedWallet.version,
+      },
+    });
+
+    entityManager.persist(new WagerTransactionRecord(transaction));
+    await entityManager.flush();
+    entityManager.persist(new WalletLedgerEntryRecord(ledgerEntry));
+    entityManager.persist([
+      new OutboxMessageRecord(processedEvent),
+      new OutboxMessageRecord(balanceEvent),
+    ]);
+    await entityManager.flush();
+
+    return resultFromTransaction(transaction, false);
+  }
+
+  private async processLoss(
+    entityManager: EntityManager,
+    wallet: Wallet,
+    command: ProcessWagerTransactionCommand,
+    external: ExternalIdentity,
+  ): Promise<ProcessWagerTransactionResult> {
+    const transaction = command.transaction;
+    transaction.markProcessed(wallet.balance, command.occurredAt);
+    const processedEvent = createProcessedEvent(
+      transaction,
+      wallet,
+      external,
+      command.processedEventId,
+      command.occurredAt,
+      wallet.balance,
+    );
+
+    entityManager.persist(new WagerTransactionRecord(transaction));
+    entityManager.persist(new OutboxMessageRecord(processedEvent));
+    await entityManager.flush();
+
+    return resultFromTransaction(transaction, false);
+  }
+
   private resolveReplay(
     record: WagerTransactionRecord,
     payloadHash: string | undefined,
-  ): ProcessBetResult {
+  ): ProcessWagerTransactionResult {
     if (record.payloadHash !== payloadHash) {
       throw new IdempotencyConflictError();
     }
@@ -261,7 +335,7 @@ function requireExternalIdentity(
     transaction.idempotencyKey === undefined ||
     transaction.payloadHash === undefined
   ) {
-    throw new Error('O processador BET recebeu uma transação interna.');
+    throw new Error('O processador recebeu uma transação interna.');
   }
 
   return {
@@ -272,10 +346,36 @@ function requireExternalIdentity(
   };
 }
 
+function createProcessedEvent(
+  transaction: WagerTransaction,
+  wallet: Wallet,
+  external: ExternalIdentity,
+  eventId: string,
+  occurredAt: Date,
+  balanceAfter: Money,
+): WagerTransactionProcessedEvent {
+  return new WagerTransactionProcessedEvent({
+    eventId,
+    aggregateId: transaction.id,
+    correlationId: transaction.id,
+    occurredAt,
+    data: {
+      transactionId: transaction.id,
+      walletId: wallet.id,
+      playerId: wallet.playerId,
+      providerId: external.providerId,
+      externalTransactionId: external.externalTransactionId,
+      kind: transaction.kind,
+      money: transaction.money.toJSON(),
+      balanceAfter: balanceAfter.toJSON(),
+    },
+  });
+}
+
 function resultFromTransaction(
   transaction: WagerTransaction,
   idempotentReplay: boolean,
-): ProcessBetResult {
+): ProcessWagerTransactionResult {
   const balance = transaction.resultBalance;
 
   if (balance === undefined) {
