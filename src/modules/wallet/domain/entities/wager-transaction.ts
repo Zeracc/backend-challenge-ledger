@@ -34,7 +34,7 @@ export interface CreateOpeningTransactionProps {
   createdAt: Date;
 }
 
-export interface CreateBetTransactionProps {
+export interface CreateExternalTransactionProps {
   id: string;
   providerId: string;
   externalTransactionId: string;
@@ -114,33 +114,22 @@ export class WagerTransaction {
     );
   }
 
-  public static createBet(props: CreateBetTransactionProps): WagerTransaction {
-    WagerTransaction.assertRequiredBetFields(props);
+  public static createBet(
+    props: CreateExternalTransactionProps,
+  ): WagerTransaction {
+    return WagerTransaction.createExternal(props, WagerTransactionKind.Bet);
+  }
 
-    if (!props.money.isPositive()) {
-      throw new InvalidWagerTransactionError(
-        'BET exige um valor monetário positivo',
-      );
-    }
+  public static createWin(
+    props: CreateExternalTransactionProps,
+  ): WagerTransaction {
+    return WagerTransaction.createExternal(props, WagerTransactionKind.Win);
+  }
 
-    return new WagerTransaction(
-      props.id,
-      props.providerId,
-      props.externalTransactionId,
-      props.idempotencyKey,
-      props.payloadHash,
-      props.walletId,
-      props.playerId,
-      props.roundId,
-      props.gameId,
-      WagerTransactionKind.Bet,
-      props.money,
-      WagerTransactionStatus.Pending,
-      undefined,
-      undefined,
-      new Date(props.createdAt.getTime()),
-      undefined,
-    );
+  public static createLoss(
+    props: CreateExternalTransactionProps,
+  ): WagerTransaction {
+    return WagerTransaction.createExternal(props, WagerTransactionKind.Loss);
   }
 
   public static rehydrate(state: WagerTransactionState): WagerTransaction {
@@ -230,8 +219,43 @@ export class WagerTransaction {
     }
   }
 
-  private static assertRequiredBetFields(
-    props: CreateBetTransactionProps,
+  private static createExternal(
+    props: CreateExternalTransactionProps,
+    kind:
+      | WagerTransactionKind.Bet
+      | WagerTransactionKind.Win
+      | WagerTransactionKind.Loss,
+  ): WagerTransaction {
+    WagerTransaction.assertRequiredExternalFields(props);
+
+    if (!props.money.isPositive()) {
+      throw new InvalidWagerTransactionError(
+        `${kind} exige um valor monetário positivo`,
+      );
+    }
+
+    return new WagerTransaction(
+      props.id,
+      props.providerId,
+      props.externalTransactionId,
+      props.idempotencyKey,
+      props.payloadHash,
+      props.walletId,
+      props.playerId,
+      props.roundId,
+      props.gameId,
+      kind,
+      props.money,
+      WagerTransactionStatus.Pending,
+      undefined,
+      undefined,
+      new Date(props.createdAt.getTime()),
+      undefined,
+    );
+  }
+
+  private static assertRequiredExternalFields(
+    props: CreateExternalTransactionProps,
   ): void {
     const boundedFields: ReadonlyArray<readonly [string, number]> = [
       [props.id, 100],

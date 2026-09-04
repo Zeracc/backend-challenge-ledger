@@ -13,11 +13,15 @@ import {
 
 import { NoOpAuthGuard } from '../../../../shared/presentation/http/no-op-auth.guard.js';
 import {
-  ProcessBetUseCase,
-  type ProcessBetInput,
-  type ProcessBetOutput,
-} from '../../application/use-cases/process-bet.js';
-import { WagerTransactionStatus } from '../../domain/entities/wager-transaction.js';
+  ProcessWagerTransactionUseCase,
+  type ProcessableWagerTransactionKind,
+  type ProcessWagerTransactionInput,
+  type ProcessWagerTransactionOutput,
+} from '../../application/use-cases/process-wager-transaction.js';
+import {
+  WagerTransactionKind,
+  WagerTransactionStatus,
+} from '../../domain/entities/wager-transaction.js';
 import {
   InvalidCurrencyError,
   InvalidMoneyAmountError,
@@ -38,18 +42,20 @@ const UUID_PATTERN =
 @Controller('wagering/transactions')
 @UseGuards(NoOpAuthGuard)
 export class WageringController {
-  public constructor(private readonly processBet: ProcessBetUseCase) {}
+  public constructor(
+    private readonly processWagerTransaction: ProcessWagerTransactionUseCase,
+  ) {}
 
   @Post()
   @HttpCode(200)
   public async create(
     @Headers('idempotency-key') idempotencyKey: string | undefined,
     @Body() body: unknown,
-  ): Promise<ProcessBetOutput> {
-    const input = parseProcessBetInput(idempotencyKey, body);
+  ): Promise<ProcessWagerTransactionOutput> {
+    const input = parseProcessWagerTransactionInput(idempotencyKey, body);
 
     try {
-      const result = await this.processBet.execute(input);
+      const result = await this.processWagerTransaction.execute(input);
 
       if (result.status === WagerTransactionStatus.Rejected) {
         throw new UnprocessableEntityException(result);
@@ -97,10 +103,10 @@ export class WageringController {
   }
 }
 
-function parseProcessBetInput(
+function parseProcessWagerTransactionInput(
   idempotencyKey: string | undefined,
   body: unknown,
-): ProcessBetInput {
+): ProcessWagerTransactionInput {
   if (!isObject(body) || !isObject(body.money)) {
     throw invalidRequest();
   }
@@ -114,6 +120,7 @@ function parseProcessBetInput(
     gameId,
     kind,
     money,
+    referenceExternalTransactionId,
   } = body;
   const { amount, currency } = money;
 
@@ -127,7 +134,8 @@ function parseProcessBetInput(
     !UUID_PATTERN.test(walletId) ||
     !isBoundedString(roundId, 150) ||
     !isBoundedString(gameId, 150) ||
-    kind !== 'BET' ||
+    !isProcessableKind(kind) ||
+    referenceExternalTransactionId !== undefined ||
     typeof amount !== 'string' ||
     typeof currency !== 'string'
   ) {
@@ -142,8 +150,19 @@ function parseProcessBetInput(
     walletId,
     roundId,
     gameId,
+    kind,
     money: { amount, currency },
   };
+}
+
+function isProcessableKind(
+  value: unknown,
+): value is ProcessableWagerTransactionKind {
+  return (
+    value === WagerTransactionKind.Bet ||
+    value === WagerTransactionKind.Win ||
+    value === WagerTransactionKind.Loss
+  );
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -165,6 +184,6 @@ function invalidRequest(): BadRequestException {
   return new BadRequestException({
     code: 'INVALID_WAGER_REQUEST',
     message:
-      'Informe Idempotency-Key e um payload BET válido com identificadores, Money e UUIDs.',
+      'Informe Idempotency-Key e um payload BET, WIN ou LOSS válido com identificadores, Money e UUIDs; referências externas ainda não são aceitas.',
   });
 }

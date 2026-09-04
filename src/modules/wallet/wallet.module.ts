@@ -7,8 +7,8 @@ import { UuidGenerator } from '../../shared/infrastructure/system/uuid-generator
 import { Sha256PayloadHasher } from '../../shared/infrastructure/serialization/sha256-payload-hasher.js';
 import { NoOpAuthGuard } from '../../shared/presentation/http/no-op-auth.guard.js';
 import { OpenWalletUseCase } from './application/use-cases/open-wallet.js';
-import { ProcessBetUseCase } from './application/use-cases/process-bet.js';
-import { MikroOrmBetTransactionProcessor } from './infrastructure/persistence/mikro-orm/bet-transaction.processor.js';
+import { ProcessWagerTransactionUseCase } from './application/use-cases/process-wager-transaction.js';
+import { MikroOrmWagerTransactionProcessor } from './infrastructure/persistence/mikro-orm/wager-transaction.processor.js';
 import { OutboxMessageRecord } from './infrastructure/persistence/mikro-orm/entities/outbox-message.record.js';
 import { WagerTransactionRecord } from './infrastructure/persistence/mikro-orm/entities/wager-transaction.record.js';
 import { WalletLedgerEntryRecord } from './infrastructure/persistence/mikro-orm/entities/wallet-ledger-entry.record.js';
@@ -28,12 +28,12 @@ const openWalletProvider: Provider = {
     ),
 };
 
-const processBetProvider: Provider = {
-  provide: ProcessBetUseCase,
+const processWagerTransactionProvider: Provider = {
+  provide: ProcessWagerTransactionUseCase,
   inject: [EntityManager],
-  useFactory: (entityManager: EntityManager): ProcessBetUseCase =>
-    new ProcessBetUseCase(
-      new MikroOrmBetTransactionProcessor(entityManager),
+  useFactory: (entityManager: EntityManager): ProcessWagerTransactionUseCase =>
+    new ProcessWagerTransactionUseCase(
+      new MikroOrmWagerTransactionProcessor(entityManager),
       new UuidGenerator(),
       new SystemClock(),
       new Sha256PayloadHasher(),
@@ -50,6 +50,10 @@ const processBetProvider: Provider = {
     ]),
   ],
   controllers: [WalletController, WageringController],
-  providers: [openWalletProvider, processBetProvider, NoOpAuthGuard],
+  providers: [
+    openWalletProvider,
+    processWagerTransactionProvider,
+    NoOpAuthGuard,
+  ],
 })
 export class WalletModule {}

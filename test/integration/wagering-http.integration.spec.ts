@@ -6,8 +6,8 @@ import { Test } from '@nestjs/testing';
 import type { MikroORM } from '@mikro-orm/postgresql';
 
 import { OpenWalletUseCase } from '../../src/modules/wallet/application/use-cases/open-wallet.js';
-import { ProcessBetUseCase } from '../../src/modules/wallet/application/use-cases/process-bet.js';
-import { MikroOrmBetTransactionProcessor } from '../../src/modules/wallet/infrastructure/persistence/mikro-orm/bet-transaction.processor.js';
+import { ProcessWagerTransactionUseCase } from '../../src/modules/wallet/application/use-cases/process-wager-transaction.js';
+import { MikroOrmWagerTransactionProcessor } from '../../src/modules/wallet/infrastructure/persistence/mikro-orm/wager-transaction.processor.js';
 import { MikroOrmWalletOpeningRepository } from '../../src/modules/wallet/infrastructure/persistence/mikro-orm/wallet-opening.repository.js';
 import { WageringController } from '../../src/modules/wallet/presentation/http/wagering.controller.js';
 import { SystemClock } from '../../src/shared/infrastructure/system/system-clock.js';
@@ -28,15 +28,20 @@ describe('POST /wagering/transactions', () => {
       new UuidGenerator(),
       new SystemClock(),
     );
-    const processBet = new ProcessBetUseCase(
-      new MikroOrmBetTransactionProcessor(orm.em.fork()),
+    const processWagerTransaction = new ProcessWagerTransactionUseCase(
+      new MikroOrmWagerTransactionProcessor(orm.em.fork()),
       new UuidGenerator(),
       new SystemClock(),
       new Sha256PayloadHasher(),
     );
     const testingModule = await Test.createTestingModule({
       controllers: [WageringController],
-      providers: [{ provide: ProcessBetUseCase, useValue: processBet }],
+      providers: [
+        {
+          provide: ProcessWagerTransactionUseCase,
+          useValue: processWagerTransaction,
+        },
+      ],
     }).compile();
 
     app = testingModule.createNestApplication();
@@ -66,8 +71,8 @@ describe('POST /wagering/transactions', () => {
     const body = betBody(wallet.id, playerId, '25.00');
     const idempotencyKey = `provider-a:${body.externalTransactionId}`;
 
-    const first = await postBet(body, idempotencyKey);
-    const replay = await postBet(body, idempotencyKey);
+    const first = await postTransaction(body, idempotencyKey);
+    const replay = await postTransaction(body, idempotencyKey);
 
     expect(first.status).toBe(200);
     expect(replay.status).toBe(200);
@@ -97,9 +102,9 @@ describe('POST /wagering/transactions', () => {
     const body = betBody(wallet.id, playerId, '25.00');
     const idempotencyKey = `provider-a:${body.externalTransactionId}`;
 
-    expect((await postBet(body, idempotencyKey)).status).toBe(200);
+    expect((await postTransaction(body, idempotencyKey)).status).toBe(200);
 
-    const conflict = await postBet(
+    const conflict = await postTransaction(
       { ...body, money: { amount: '26.00', currency: 'BRL' } },
       idempotencyKey,
     );
@@ -118,7 +123,7 @@ describe('POST /wagering/transactions', () => {
     });
     const body = betBody(wallet.id, playerId, '25.00');
 
-    const response = await postBet(
+    const response = await postTransaction(
       body,
       `provider-a:${body.externalTransactionId}`,
     );
@@ -132,14 +137,57 @@ describe('POST /wagering/transactions', () => {
     });
   });
 
+  it('processa WIN e LOSS com respostas financeiras distintas', async () => {
+    const playerId = randomUUID();
+    const wallet = await requiredOpenWallet().execute({
+      playerId,
+      initialBalance: { amount: '100.00', currency: 'BRL' },
+    });
+    const winBody = wagerBody('WIN', wallet.id, playerId, '25.00');
+    const lossBody = wagerBody('LOSS', wallet.id, playerId, '10.00');
+
+    const win = await postTransaction(
+      winBody,
+      `provider-a:${winBody.externalTransactionId}`,
+    );
+    const loss = await postTransaction(
+      lossBody,
+      `provider-a:${lossBody.externalTransactionId}`,
+    );
+
+    expect(win.status).toBe(200);
+    expect(await win.json()).toMatchObject({
+      status: 'PROCESSED',
+      balance: { amount: '125.00', currency: 'BRL' },
+      idempotentReplay: false,
+    });
+    expect(loss.status).toBe(200);
+    expect(await loss.json()).toMatchObject({
+      status: 'PROCESSED',
+      balance: { amount: '125.00', currency: 'BRL' },
+      idempotentReplay: false,
+    });
+  });
+
   it('rejeita header ausente e impede OPENING externo', async () => {
     const invalidBody = {
       ...betBody(randomUUID(), randomUUID(), '25.00'),
       kind: 'OPENING',
     };
 
-    expect((await postBet(invalidBody)).status).toBe(400);
-    expect((await postBet(invalidBody, 'key')).status).toBe(400);
+    expect((await postTransaction(invalidBody)).status).toBe(400);
+    expect((await postTransaction(invalidBody, 'key')).status).toBe(400);
+  });
+
+  it('não ignora referência enviada antes da fase de reversões', async () => {
+    const body = {
+      ...wagerBody('WIN', randomUUID(), randomUUID(), '25.00'),
+      referenceExternalTransactionId: 'bet-123',
+    };
+
+    expect((await postTransaction(body, 'provider-a:win-123')).status).toBe(
+      400,
+    );
   });
 });
 
@@ -159,6 +207,15 @@ function betBody(
   playerId: string,
   amount: string,
 ): WagerHttpBody {
+  return wagerBody('BET', walletId, playerId, amount);
+}
+
+function wagerBody(
+  kind: 'BET' | 'WIN' | 'LOSS',
+  walletId: string,
+  playerId: string,
+  amount: string,
+): WagerHttpBody {
   return {
     providerId: 'provider-a',
     externalTransactionId: randomUUID(),
@@ -166,12 +223,12 @@ function betBody(
     walletId,
     roundId: 'round-1',
     gameId: 'game-1',
-    kind: 'BET',
+    kind,
     money: { amount, currency: 'BRL' },
   };
 }
 
-async function postBet(
+async function postTransaction(
   body: object,
   idempotencyKey?: string,
 ): Promise<Response> {

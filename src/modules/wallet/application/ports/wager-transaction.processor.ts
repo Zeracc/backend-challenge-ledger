@@ -1,11 +1,11 @@
-import type { MoneyProps } from '../../domain/value-objects/money.js';
 import type {
   WagerFailureCode,
   WagerTransaction,
   WagerTransactionStatus,
 } from '../../domain/entities/wager-transaction.js';
+import type { MoneyProps } from '../../domain/value-objects/money.js';
 
-export interface ProcessBetCommand {
+export interface ProcessWagerTransactionCommand {
   transaction: WagerTransaction;
   ledgerEntryId: string;
   processedEventId: string;
@@ -14,7 +14,7 @@ export interface ProcessBetCommand {
   occurredAt: Date;
 }
 
-export interface ProcessBetResult {
+export interface ProcessWagerTransactionResult {
   transactionId: string;
   status: WagerTransactionStatus;
   balance: MoneyProps;
@@ -22,6 +22,8 @@ export interface ProcessBetResult {
   idempotentReplay: boolean;
 }
 
-export interface BetTransactionProcessor {
-  processAtomically(command: ProcessBetCommand): Promise<ProcessBetResult>;
+export interface WagerTransactionProcessor {
+  processAtomically(
+    command: ProcessWagerTransactionCommand,
+  ): Promise<ProcessWagerTransactionResult>;
 }

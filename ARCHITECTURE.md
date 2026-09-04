@@ -17,8 +17,7 @@ A correção do sistema tem prioridade sobre o throughput. A ordem das preocupa�
 4. operabilidade e desempenho.
 
 As falhas eliminatórias são bloqueadores P0 permanentes para qualquer entrega.
-A aplicação concreta dessas garantias e suas provas estão registradas em
-[`docs/P0-GUARDRAILS.md`](docs/P0-GUARDRAILS.md).
+Essas garantias e suas provas são revalidadas antes da integração de cada fase.
 
 ## Fronteiras arquiteturais
 
@@ -117,6 +116,30 @@ O resultado terminal armazena o saldo observado no processamento. Assim, um
 replay devolve a resposta histórica mesmo que movimentações posteriores alterem
 a wallet. Índices únicos protegem `Idempotency-Key` e a identidade externa
 `(providerId, externalTransactionId)`.
+
+## Processamento de WIN e LOSS
+
+O mesmo endpoint, caso de uso e processador transacional de `BET` também atendem
+`WIN` e `LOSS`. O tipo da operação faz parte do payload canônico usado na
+idempotência, impedindo que uma mesma chave seja reutilizada para trocar o efeito
+financeiro do comando.
+
+`WIN` adquire o lock da Wallet, aplica um crédito imutável, incrementa a versão e
+persiste um ledger `CREDIT`. Os eventos `WagerTransactionProcessed` e
+`WalletBalanceChanged` entram na outbox dentro da mesma transação. Créditos
+duplicados são resolvidos pela identidade persistente, inclusive entre processos
+distintos.
+
+`LOSS` também passa pelo lock da Wallet para observar uma posição serializada do
+saldo, mas não altera saldo ou versão e não cria ledger. Somente a transação
+`PROCESSED` e o evento `WagerTransactionProcessed` são persistidos. Um trigger no
+PostgreSQL impede a inclusão de ledger para `LOSS` e valida status, valor e
+direção para os tipos financeiros já suportados.
+
+Referências externas ainda são rejeitadas pelo contrato HTTP desta fase para que
+não sejam silenciosamente ignoradas. `REFUND`, `ROLLBACK` e o suporte de referência
+opcional em `WIN` serão introduzidos junto às regras completas de escopo e
+reprocessamento fora de ordem.
 
 ## Idempotência
 

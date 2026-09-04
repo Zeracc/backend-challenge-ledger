@@ -74,6 +74,14 @@ export class InvalidWalletDebitError extends Error {
   }
 }
 
+export class InvalidWalletCreditError extends Error {
+  public readonly code = 'INVALID_WALLET_CREDIT';
+
+  public constructor() {
+    super('Um crédito da wallet exige valor monetário positivo.');
+  }
+}
+
 export class InvalidWagerTransactionError extends Error {
   public readonly code = 'INVALID_WAGER_TRANSACTION';
 

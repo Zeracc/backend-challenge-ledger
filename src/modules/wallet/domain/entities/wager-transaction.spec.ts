@@ -160,3 +160,50 @@ describe('WagerTransaction.createBet', () => {
     ).toThrow(InvalidWagerTransactionError);
   });
 });
+
+describe('WagerTransaction WIN e LOSS', () => {
+  const createdAt = new Date('2026-09-04T12:00:00.000Z');
+  const commonProps = {
+    id: 'transaction-id',
+    providerId: 'provider-a',
+    externalTransactionId: 'external-id',
+    idempotencyKey: 'provider-a:external-id',
+    payloadHash: 'a'.repeat(64),
+    walletId: 'wallet-id',
+    playerId: 'player-id',
+    roundId: 'round-id',
+    gameId: 'game-id',
+    money: Money.from({ amount: '25.00', currency: 'BRL' }),
+    createdAt,
+  };
+
+  it('cria WIN e LOSS pendentes com suas identidades externas', () => {
+    const win = WagerTransaction.createWin(commonProps);
+    const loss = WagerTransaction.createLoss({
+      ...commonProps,
+      id: 'loss-id',
+      externalTransactionId: 'loss-external-id',
+      idempotencyKey: 'provider-a:loss-external-id',
+    });
+
+    expect(win.kind).toBe(WagerTransactionKind.Win);
+    expect(loss.kind).toBe(WagerTransactionKind.Loss);
+    expect(win.status).toBe(WagerTransactionStatus.Pending);
+    expect(loss.status).toBe(WagerTransactionStatus.Pending);
+  });
+
+  it('exige valor positivo em WIN e LOSS', () => {
+    expect(() =>
+      WagerTransaction.createWin({
+        ...commonProps,
+        money: Money.zero('BRL'),
+      }),
+    ).toThrow(InvalidWagerTransactionError);
+    expect(() =>
+      WagerTransaction.createLoss({
+        ...commonProps,
+        money: Money.zero('BRL'),
+      }),
+    ).toThrow(InvalidWagerTransactionError);
+  });
+});

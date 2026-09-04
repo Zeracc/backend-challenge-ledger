@@ -21,16 +21,18 @@ concorrente de apostas:
 - migration reversível com constraints financeiras no PostgreSQL;
 - endpoint `POST /wallets` com respostas `201`, `400` e `409`;
 - processamento de `BET` com lock por Wallet no PostgreSQL;
+- processamento de `WIN` com crédito, ledger e outbox atômicos;
+- processamento de `LOSS` sem alteração de saldo, versão ou ledger;
 - idempotência persistente por chave e hash canônico SHA-256;
 - rejeição auditável por saldo insuficiente, sem lançamento no ledger;
 - endpoint `POST /wagering/transactions` com replay e conflitos distintos;
 - testes de 50 duplicatas concorrentes em três processos Bun;
 - documentos de arquitetura e rastreabilidade dos critérios de aceite.
 
-`WIN`, `LOSS`, `REFUND`, `ROLLBACK`, SQS e o publisher da outbox ainda não foram
-implementados. Cada capacidade somente será marcada como concluída após a
-comprovação de suas garantias por testes unitários, de integração e de
-concorrência.
+Referências opcionais de `WIN`, `REFUND`, `ROLLBACK`, SQS e o publisher da outbox
+ainda não foram implementados. Cada capacidade somente será marcada como
+concluída após a comprovação de suas garantias por testes unitários, de integração
+e de concorrência.
 
 ## Pré-requisitos
 
@@ -86,7 +88,7 @@ Content-Type: application/json
 }
 ```
 
-### Processar uma aposta
+### Processar uma transação de aposta
 
 ```http
 POST /wagering/transactions
@@ -104,6 +106,9 @@ Content-Type: application/json
   "money": { "amount": "25.00", "currency": "BRL" }
 }
 ```
+
+O mesmo contrato aceita `WIN` e `LOSS`. Nesta fase, campos de referência externa
+ainda são rejeitados explicitamente.
 
 ## Verificações de qualidade
 
@@ -124,8 +129,6 @@ são removidos ao final da execução.
 
 - [`ARCHITECTURE.md`](ARCHITECTURE.md): fronteiras, estratégia de consistência e
   trade-offs.
-- [`docs/P0-GUARDRAILS.md`](docs/P0-GUARDRAILS.md): bloqueios associados às
-  falhas eliminatórias.
 - [`docs/ACCEPTANCE-CRITERIA.md`](docs/ACCEPTANCE-CRITERIA.md): rastreabilidade
   entre requisitos, implementação e evidências.
 - [`docs/CHALLENGE.md`](docs/CHALLENGE.md): enunciado original da Jungle Gaming.
