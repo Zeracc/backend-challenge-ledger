@@ -23,13 +23,16 @@ concorrente de apostas:
 - processamento de `BET` com lock por Wallet no PostgreSQL;
 - processamento de `WIN` com crédito, ledger e outbox atômicos;
 - processamento de `LOSS` sem alteração de saldo, versão ou ledger;
+- referência opcional de `WIN` a uma `BET` da mesma rodada;
+- `REFUND` integral de `BET` e `ROLLBACK` com efeito financeiro inverso;
+- referências ausentes persistidas como `PENDING_REFERENCE`, com resposta `202`;
 - idempotência persistente por chave e hash canônico SHA-256;
 - rejeição auditável por saldo insuficiente, sem lançamento no ledger;
 - endpoint `POST /wagering/transactions` com replay e conflitos distintos;
 - testes de 50 duplicatas concorrentes em três processos Bun;
 - documentos de arquitetura e rastreabilidade dos critérios de aceite.
 
-Referências opcionais de `WIN`, `REFUND`, `ROLLBACK`, SQS e o publisher da outbox
+O reprocessamento agendado de `PENDING_REFERENCE`, SQS e o publisher da outbox
 ainda não foram implementados. Cada capacidade somente será marcada como
 concluída após a comprovação de suas garantias por testes unitários, de integração
 e de concorrência.
@@ -107,8 +110,10 @@ Content-Type: application/json
 }
 ```
 
-O mesmo contrato aceita `WIN` e `LOSS`. Nesta fase, campos de referência externa
-ainda são rejeitados explicitamente.
+O mesmo contrato aceita `WIN`, `LOSS`, `REFUND` e `ROLLBACK`. `WIN` aceita
+`referenceExternalTransactionId` opcional; as duas reversões o exigem. Quando a
+referência ainda não existe, a API persiste a solicitação e responde `202` com
+status `PENDING_REFERENCE`. `REFUND` e `ROLLBACK` são sempre integrais.
 
 ## Verificações de qualidade
 

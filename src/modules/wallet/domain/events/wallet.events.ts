@@ -26,6 +26,8 @@ export interface WagerTransactionProcessedData {
   readonly playerId: string;
   readonly providerId?: string;
   readonly externalTransactionId?: string;
+  readonly referenceExternalTransactionId?: string;
+  readonly referenceTransactionId?: string;
   readonly kind: WagerTransactionKind;
   readonly money: Readonly<MoneyProps>;
   readonly balanceAfter: Readonly<MoneyProps>;
@@ -37,10 +39,24 @@ export interface WagerTransactionRejectedData {
   readonly playerId: string;
   readonly providerId: string;
   readonly externalTransactionId: string;
+  readonly referenceExternalTransactionId?: string;
+  readonly referenceTransactionId?: string;
   readonly kind: WagerTransactionKind;
   readonly money: Readonly<MoneyProps>;
   readonly balance: Readonly<MoneyProps>;
   readonly failureCode: WagerFailureCode;
+}
+
+export interface WagerTransactionPendingReferenceData {
+  readonly transactionId: string;
+  readonly walletId: string;
+  readonly playerId: string;
+  readonly providerId: string;
+  readonly externalTransactionId: string;
+  readonly referenceExternalTransactionId: string;
+  readonly kind: WagerTransactionKind;
+  readonly money: Readonly<MoneyProps>;
+  readonly balance: Readonly<MoneyProps>;
 }
 
 export class WalletBalanceChangedEvent extends IntegrationEvent<WalletBalanceChangedData> {
@@ -84,6 +100,24 @@ export class WagerTransactionRejectedEvent extends IntegrationEvent<WagerTransac
 
   public constructor(
     props: IntegrationEventProps<WagerTransactionRejectedData>,
+  ) {
+    super({
+      ...props,
+      data: {
+        ...props.data,
+        money: freezeMoney(props.data.money),
+        balance: freezeMoney(props.data.balance),
+      },
+    });
+  }
+}
+
+export class WagerTransactionPendingReferenceEvent extends IntegrationEvent<WagerTransactionPendingReferenceData> {
+  public readonly eventType = 'WagerTransactionPendingReference';
+  public readonly version = 1;
+
+  public constructor(
+    props: IntegrationEventProps<WagerTransactionPendingReferenceData>,
   ) {
     super({
       ...props,

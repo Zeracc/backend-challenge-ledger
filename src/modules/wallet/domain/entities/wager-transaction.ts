@@ -24,6 +24,13 @@ export enum WagerTransactionStatus {
 
 export enum WagerFailureCode {
   InsufficientFunds = 'INSUFFICIENT_FUNDS',
+  ReferenceScopeMismatch = 'REFERENCE_SCOPE_MISMATCH',
+  InvalidReferenceKind = 'INVALID_REFERENCE_KIND',
+  ReferenceAmountMismatch = 'REFERENCE_AMOUNT_MISMATCH',
+  ReferenceNotProcessed = 'REFERENCE_NOT_PROCESSED',
+  DuplicateReversal = 'DUPLICATE_REVERSAL',
+  RollbackInsufficientFunds = 'ROLLBACK_INSUFFICIENT_FUNDS',
+  ReferenceNotFound = 'REFERENCE_NOT_FOUND',
 }
 
 export interface CreateOpeningTransactionProps {
@@ -40,6 +47,7 @@ export interface CreateExternalTransactionProps {
   externalTransactionId: string;
   idempotencyKey: string;
   payloadHash: string;
+  referenceExternalTransactionId?: string;
   walletId: string;
   playerId: string;
   roundId: string;
@@ -50,21 +58,23 @@ export interface CreateExternalTransactionProps {
 
 export interface WagerTransactionState {
   id: string;
-  providerId?: string;
-  externalTransactionId?: string;
-  idempotencyKey?: string;
-  payloadHash?: string;
+  providerId?: string | undefined;
+  externalTransactionId?: string | undefined;
+  idempotencyKey?: string | undefined;
+  payloadHash?: string | undefined;
+  referenceExternalTransactionId?: string | undefined;
+  referenceTransactionId?: string | undefined;
   walletId: string;
   playerId: string;
-  roundId?: string;
-  gameId?: string;
+  roundId?: string | undefined;
+  gameId?: string | undefined;
   kind: WagerTransactionKind;
   status: WagerTransactionStatus;
   money: Money;
-  resultBalance?: Money;
-  failureCode?: WagerFailureCode;
+  resultBalance?: Money | undefined;
+  failureCode?: WagerFailureCode | undefined;
   createdAt: Date;
-  processedAt?: Date;
+  processedAt?: Date | undefined;
 }
 
 export class WagerTransaction {
@@ -74,6 +84,8 @@ export class WagerTransaction {
     public readonly externalTransactionId: string | undefined,
     public readonly idempotencyKey: string | undefined,
     public readonly payloadHash: string | undefined,
+    public readonly referenceExternalTransactionId: string | undefined,
+    private currentReferenceTransactionId: string | undefined,
     public readonly walletId: string,
     public readonly playerId: string,
     public readonly roundId: string | undefined,
@@ -96,6 +108,8 @@ export class WagerTransaction {
 
     return new WagerTransaction(
       props.id,
+      undefined,
+      undefined,
       undefined,
       undefined,
       undefined,
@@ -132,6 +146,21 @@ export class WagerTransaction {
     return WagerTransaction.createExternal(props, WagerTransactionKind.Loss);
   }
 
+  public static createRefund(
+    props: CreateExternalTransactionProps,
+  ): WagerTransaction {
+    return WagerTransaction.createExternal(props, WagerTransactionKind.Refund);
+  }
+
+  public static createRollback(
+    props: CreateExternalTransactionProps,
+  ): WagerTransaction {
+    return WagerTransaction.createExternal(
+      props,
+      WagerTransactionKind.Rollback,
+    );
+  }
+
   public static rehydrate(state: WagerTransactionState): WagerTransaction {
     return new WagerTransaction(
       state.id,
@@ -139,6 +168,8 @@ export class WagerTransaction {
       state.externalTransactionId,
       state.idempotencyKey,
       state.payloadHash,
+      state.referenceExternalTransactionId,
+      state.referenceTransactionId,
       state.walletId,
       state.playerId,
       state.roundId,
@@ -167,6 +198,10 @@ export class WagerTransaction {
     return this.currentFailureCode;
   }
 
+  public get referenceTransactionId(): string | undefined {
+    return this.currentReferenceTransactionId;
+  }
+
   public get createdAt(): Date {
     return new Date(this.creationDate.getTime());
   }
@@ -177,20 +212,91 @@ export class WagerTransaction {
       : new Date(this.processingDate.getTime());
   }
 
-  public markProcessed(balanceAfter: Money, at: Date): void {
+  public markProcessed(
+    balanceAfter: Money,
+    at: Date,
+    referenceTransactionId?: string,
+  ): void {
     this.assertNotTerminal();
     this.assertResultCurrency(balanceAfter);
     this.currentStatus = WagerTransactionStatus.Processed;
     this.currentResultBalance = balanceAfter;
+    this.currentReferenceTransactionId = referenceTransactionId;
     this.processingDate = new Date(at.getTime());
   }
 
-  public reject(code: WagerFailureCode, balance: Money): void {
+  public reject(
+    code: WagerFailureCode,
+    balance: Money,
+    referenceTransactionId?: string,
+  ): void {
     this.assertNotTerminal();
     this.assertResultCurrency(balance);
     this.currentStatus = WagerTransactionStatus.Rejected;
     this.currentFailureCode = code;
     this.currentResultBalance = balance;
+    this.currentReferenceTransactionId = referenceTransactionId;
+  }
+
+  public markPendingReference(balance: Money): void {
+    this.assertNotTerminal();
+    this.assertResultCurrency(balance);
+
+    if (this.referenceExternalTransactionId === undefined) {
+      throw new InvalidWagerTransactionError(
+        'somente uma transação com referência externa pode aguardá-la',
+      );
+    }
+
+    this.currentStatus = WagerTransactionStatus.PendingReference;
+    this.currentResultBalance = balance;
+  }
+
+  public referenceFailureFor(
+    reference: WagerTransaction,
+  ): WagerFailureCode | undefined {
+    if (this.referenceExternalTransactionId === undefined) {
+      return undefined;
+    }
+
+    if (
+      this.providerId !== reference.providerId ||
+      this.referenceExternalTransactionId !== reference.externalTransactionId ||
+      this.playerId !== reference.playerId ||
+      this.walletId !== reference.walletId ||
+      this.money.currency !== reference.money.currency ||
+      this.roundId !== reference.roundId
+    ) {
+      return WagerFailureCode.ReferenceScopeMismatch;
+    }
+
+    if (reference.status !== WagerTransactionStatus.Processed) {
+      return WagerFailureCode.ReferenceNotProcessed;
+    }
+
+    const allowedKinds =
+      this.kind === WagerTransactionKind.Win ||
+      this.kind === WagerTransactionKind.Refund
+        ? [WagerTransactionKind.Bet]
+        : [
+            WagerTransactionKind.Bet,
+            WagerTransactionKind.Win,
+            WagerTransactionKind.Refund,
+          ];
+
+    if (!allowedKinds.includes(reference.kind)) {
+      return WagerFailureCode.InvalidReferenceKind;
+    }
+
+    if (
+      (this.kind === WagerTransactionKind.Refund ||
+        this.kind === WagerTransactionKind.Rollback) &&
+      !this.money.equals(reference.money)
+    ) {
+      return WagerFailureCode.ReferenceAmountMismatch;
+    }
+
+    return undefined;
   }
 
   public isTerminal(): boolean {
@@ -224,7 +330,9 @@ export class WagerTransaction {
     kind:
       | WagerTransactionKind.Bet
       | WagerTransactionKind.Win
-      | WagerTransactionKind.Loss,
+      | WagerTransactionKind.Loss
+      | WagerTransactionKind.Refund
+      | WagerTransactionKind.Rollback,
   ): WagerTransaction {
     WagerTransaction.assertRequiredExternalFields(props);
 
@@ -234,12 +342,47 @@ export class WagerTransaction {
       );
     }
 
+    const referenceExternalTransactionId = props.referenceExternalTransactionId;
+    const hasReference = referenceExternalTransactionId !== undefined;
+
+    if (
+      (kind === WagerTransactionKind.Refund ||
+        kind === WagerTransactionKind.Rollback) &&
+      !hasReference
+    ) {
+      throw new InvalidWagerTransactionError(
+        `${kind} exige referenceExternalTransactionId`,
+      );
+    }
+
+    if (
+      (kind === WagerTransactionKind.Bet ||
+        kind === WagerTransactionKind.Loss) &&
+      hasReference
+    ) {
+      throw new InvalidWagerTransactionError(
+        `${kind} não aceita referenceExternalTransactionId`,
+      );
+    }
+
+    if (
+      hasReference &&
+      (referenceExternalTransactionId.trim().length === 0 ||
+        referenceExternalTransactionId.length > 150)
+    ) {
+      throw new InvalidWagerTransactionError(
+        'referenceExternalTransactionId é inválido',
+      );
+    }
+
     return new WagerTransaction(
       props.id,
       props.providerId,
       props.externalTransactionId,
       props.idempotencyKey,
       props.payloadHash,
+      props.referenceExternalTransactionId,
+      undefined,
       props.walletId,
       props.playerId,
       props.roundId,

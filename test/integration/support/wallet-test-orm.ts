@@ -9,6 +9,7 @@ import { WalletRecord } from '../../../src/modules/wallet/infrastructure/persist
 import { Migration20260904150000 } from '../../../src/shared/infrastructure/database/migrations/Migration20260904150000.js';
 import { Migration20260905120000 } from '../../../src/shared/infrastructure/database/migrations/Migration20260905120000.js';
 import { Migration20260906120000 } from '../../../src/shared/infrastructure/database/migrations/Migration20260906120000.js';
+import { Migration20260907120000 } from '../../../src/shared/infrastructure/database/migrations/Migration20260907120000.js';
 import { loadPostgreSqlSettings } from '../../../src/shared/infrastructure/database/postgresql-settings.js';
 
 const entities = [
@@ -34,6 +35,7 @@ export async function createWalletTestOrm(
         Migration20260904150000,
         Migration20260905120000,
         Migration20260906120000,
+        Migration20260907120000,
       ],
       schema,
       transactional: true,

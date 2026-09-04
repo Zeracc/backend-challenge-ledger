@@ -1,75 +1,32 @@
 import { randomUUID } from 'node:crypto';
-import { fileURLToPath } from 'node:url';
 
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import type { MikroORM, PostgreSqlConnection } from '@mikro-orm/postgresql';
 
-import { OpenWalletUseCase } from '../../src/modules/wallet/application/use-cases/open-wallet.js';
-import {
+import type {
   ProcessWagerTransactionUseCase,
-  type ProcessWagerTransactionInput,
-  type ProcessableWagerTransactionKind,
+  ProcessWagerTransactionInput,
+  ProcessableWagerTransactionKind,
 } from '../../src/modules/wallet/application/use-cases/process-wager-transaction.js';
 import {
   WagerTransactionKind,
   WagerTransactionStatus,
 } from '../../src/modules/wallet/domain/entities/wager-transaction.js';
 import { ExternalTransactionConflictError } from '../../src/modules/wallet/domain/errors/wallet.errors.js';
-import { MikroOrmWagerTransactionProcessor } from '../../src/modules/wallet/infrastructure/persistence/mikro-orm/wager-transaction.processor.js';
-import { MikroOrmWalletOpeningRepository } from '../../src/modules/wallet/infrastructure/persistence/mikro-orm/wallet-opening.repository.js';
 import type { IdGenerator } from '../../src/shared/application/ports/id-generator.js';
-import { SystemClock } from '../../src/shared/infrastructure/system/system-clock.js';
-import { UuidGenerator } from '../../src/shared/infrastructure/system/uuid-generator.js';
-import { Sha256PayloadHasher } from '../../src/shared/infrastructure/serialization/sha256-payload-hasher.js';
-import { createWalletTestOrm } from './support/wallet-test-orm.js';
-
-interface WalletRow {
-  balance: string;
-  version: number;
-}
-
-interface TransactionRow {
-  kind: string;
-  status: string;
-  resultBalance: string;
-}
-
-interface LedgerRow {
-  direction: string;
-  amount: string;
-  balanceBefore: string;
-  balanceAfter: string;
-}
-
-interface WorkerResult {
-  transactionId: string;
-  idempotentReplay: boolean;
-}
+import {
+  SequenceIdGenerator,
+  WagerTestContext,
+  captureRejection,
+  errorMessage,
+} from './support/wager-test-context.js';
 
 const schemaName = `win_loss_test_${randomUUID().replaceAll('-', '')}`;
-const secondaryOrms: MikroORM[] = [];
-let orm: MikroORM | undefined;
+const context = new WagerTestContext(schemaName);
 
 describe('WIN and LOSS processing with PostgreSQL', () => {
-  beforeAll(async () => {
-    orm = await createWalletTestOrm(schemaName, true);
-  });
-
-  afterAll(async () => {
-    await Promise.all(
-      secondaryOrms.map(async (instance) => instance.close(true)),
-    );
-
-    if (orm === undefined) {
-      return;
-    }
-
-    await orm.migrator.down({ schema: schemaName, to: 0 });
-    await orm.em
-      .getConnection()
-      .execute(`drop schema if exists "${schemaName}" cascade`);
-    await orm.close(true);
-  });
+  beforeAll(async () => context.start());
+  afterAll(async () => context.stop());
 
   it('credita WIN e grava transação, ledger e dois eventos atomicamente', async () => {
     const playerId = randomUUID();
@@ -85,7 +42,7 @@ describe('WIN and LOSS processing with PostgreSQL', () => {
       balance: '125.00',
       version: 2,
     });
-    expect(await transactionState(result.transactionId)).toEqual({
+    expect(await transactionState(result.transactionId)).toMatchObject({
       kind: WagerTransactionKind.Win,
       status: WagerTransactionStatus.Processed,
       resultBalance: '125.00',
@@ -116,7 +73,7 @@ describe('WIN and LOSS processing with PostgreSQL', () => {
       balance: '100.00',
       version: 1,
     });
-    expect(await transactionState(result.transactionId)).toEqual({
+    expect(await transactionState(result.transactionId)).toMatchObject({
       kind: WagerTransactionKind.Loss,
       status: WagerTransactionStatus.Processed,
       resultBalance: '100.00',
@@ -356,52 +313,27 @@ async function openWallet(
   playerId: string,
   amount: string,
 ): Promise<{ id: string }> {
-  return new OpenWalletUseCase(
-    new MikroOrmWalletOpeningRepository(getOrm().em.fork()),
-    new UuidGenerator(),
-    new SystemClock(),
-  ).execute({
-    playerId,
-    initialBalance: { amount, currency: 'BRL' },
-  });
+  return context.openWallet(playerId, amount);
 }
 
 function createUseCase(
   instance: MikroORM,
-  idGenerator: IdGenerator = new UuidGenerator(),
+  idGenerator?: IdGenerator,
 ): ProcessWagerTransactionUseCase {
-  return new ProcessWagerTransactionUseCase(
-    new MikroOrmWagerTransactionProcessor(instance.em.fork()),
-    idGenerator,
-    new SystemClock(),
-    new Sha256PayloadHasher(),
-  );
+  return context.createUseCase(instance, idGenerator);
 }
 
 async function independentUseCases(): Promise<
   ProcessWagerTransactionUseCase[]
 > {
-  const instances = await Promise.all([
-    createWalletTestOrm(schemaName, false),
-    createWalletTestOrm(schemaName, false),
-    createWalletTestOrm(schemaName, false),
-  ]);
-  secondaryOrms.push(...instances);
-
-  return instances.map((instance) => createUseCase(instance));
+  return context.independentUseCases(3);
 }
 
 function requiredUseCase(
   useCases: ProcessWagerTransactionUseCase[],
   index: number,
 ): ProcessWagerTransactionUseCase {
-  const useCase = useCases[index % useCases.length];
-
-  if (useCase === undefined) {
-    throw new Error('Caso de uso WIN concorrente não encontrado.');
-  }
-
-  return useCase;
+  return context.requiredUseCase(useCases, index);
 }
 
 function wagerInput(
@@ -411,187 +343,44 @@ function wagerInput(
   amount: string,
   externalTransactionId = randomUUID(),
 ): ProcessWagerTransactionInput {
-  return {
-    idempotencyKey: `provider-a:${externalTransactionId}`,
-    providerId: 'provider-a',
+  return context.wagerInput(kind, walletId, playerId, amount, {
     externalTransactionId,
-    playerId,
-    walletId,
-    roundId: 'round-1',
-    gameId: 'game-1',
-    kind,
-    money: { amount, currency: 'BRL' },
-  };
+  });
 }
 
-async function walletState(walletId: string): Promise<WalletRow | undefined> {
-  const rows = await connection().execute<WalletRow[]>(
-    `select "balance", "version" from "${schemaName}"."wallets" where "id" = ?`,
-    [walletId],
-  );
-
-  return rows[0];
-}
-
-async function transactionState(
-  transactionId: string,
-): Promise<TransactionRow | undefined> {
-  const rows = await connection().execute<TransactionRow[]>(
-    `select "kind", "status", "result_balance" as "resultBalance" from "${schemaName}"."wager_transactions" where "id" = ?`,
-    [transactionId],
-  );
-
-  return rows[0];
-}
-
-async function ledgerState(
-  transactionId: string,
-): Promise<LedgerRow | undefined> {
-  const rows = await connection().execute<LedgerRow[]>(
-    `select "direction", "amount", "balance_before" as "balanceBefore", "balance_after" as "balanceAfter" from "${schemaName}"."wallet_ledger_entries" where "transaction_id" = ?`,
-    [transactionId],
-  );
-
-  return rows[0];
-}
-
-async function transactionOutboxTypes(
-  transactionId: string,
-): Promise<string[]> {
-  const rows = await connection().execute<Array<{ eventType: string }>>(
-    `select "event_type" as "eventType" from "${schemaName}"."outbox_messages" where "payload"->>'correlationId' = ? order by "event_type"`,
-    [transactionId],
-  );
-
-  return rows.map((row) => row.eventType);
-}
-
-async function findOpeningOutboxId(walletId: string): Promise<string> {
-  const rows = await connection().execute<Array<{ id: string }>>(
-    `select "id" from "${schemaName}"."outbox_messages" where "payload"->'data'->>'walletId' = ? limit 1`,
-    [walletId],
-  );
-  const id = rows[0]?.id;
-
-  if (id === undefined) {
-    throw new Error(
-      'Evento de abertura não encontrado para o teste de rollback.',
-    );
-  }
-
-  return id;
-}
+const walletState = context.walletState.bind(context);
+const transactionState = context.transactionState.bind(context);
+const ledgerState = context.ledgerState.bind(context);
+const transactionOutboxTypes = context.transactionOutboxTypes.bind(context);
+const findOpeningOutboxId = context.findOpeningOutboxId.bind(context);
 
 async function countTransactions(
   walletId: string,
   kind: WagerTransactionKind,
 ): Promise<number> {
-  const rows = await connection().execute<Array<{ count: number }>>(
-    `select count(*)::int as "count" from "${schemaName}"."wager_transactions" where "wallet_id" = ? and "kind" = ?`,
-    [walletId, kind],
-  );
-
-  return rows[0]?.count ?? 0;
+  return context.countTransactions(walletId, kind);
 }
 
 async function countLedgerEntries(
   walletId: string,
   kind: WagerTransactionKind,
 ): Promise<number> {
-  const rows = await connection().execute<Array<{ count: number }>>(
-    `select count(*)::int as "count" from "${schemaName}"."wallet_ledger_entries" l join "${schemaName}"."wager_transactions" t on t.id = l.transaction_id where l.wallet_id = ? and t.kind = ?`,
-    [walletId, kind],
-  );
-
-  return rows[0]?.count ?? 0;
+  return context.countLedgerEntries(walletId, kind);
 }
 
-async function expectReconciled(walletId: string): Promise<void> {
-  const rows = await connection().execute<
-    Array<{ ledgerBalance: string; walletBalance: string }>
-  >(
-    `
-      select
-        w.balance as "walletBalance",
-        coalesce(sum(case l.direction when 'CREDIT' then l.amount when 'DEBIT' then -l.amount end), 0)::numeric(20, 2) as "ledgerBalance"
-      from "${schemaName}"."wallets" w
-      left join "${schemaName}"."wallet_ledger_entries" l on l.wallet_id = w.id
-      where w.id = ?
-      group by w.id
-    `,
-    [walletId],
-  );
-
-  expect(rows[0]?.walletBalance).toBe(rows[0]?.ledgerBalance);
-}
+const expectReconciled = context.expectReconciled.bind(context);
 
 async function runWagerWorker(
   input: ProcessWagerTransactionInput,
   attempts: number,
-): Promise<WorkerResult[]> {
-  const workerPath = fileURLToPath(
-    new URL('./fixtures/wager-process-worker.ts', import.meta.url),
-  );
-  const child = Bun.spawn([process.execPath, workerPath], {
-    cwd: process.cwd(),
-    env: {
-      ...process.env,
-      WAGER_WORKER_SCHEMA: schemaName,
-      WAGER_WORKER_INPUT: JSON.stringify(input),
-      WAGER_WORKER_ATTEMPTS: attempts.toString(),
-    },
-    stdout: 'pipe',
-    stderr: 'pipe',
-  });
-  const [exitCode, stdout, stderr] = await Promise.all([
-    child.exited,
-    new Response(child.stdout).text(),
-    new Response(child.stderr).text(),
-  ]);
-
-  if (exitCode !== 0) {
-    throw new Error(`Worker WIN terminou com código ${exitCode}: ${stderr}`);
-  }
-
-  return JSON.parse(stdout) as WorkerResult[];
+): ReturnType<WagerTestContext['runWagerWorker']> {
+  return context.runWagerWorker(input, attempts);
 }
 
 function connection(): PostgreSqlConnection {
-  return getOrm().em.getConnection();
+  return context.connection();
 }
 
 function getOrm(): MikroORM {
-  if (orm === undefined) {
-    throw new Error('O ORM WIN/LOSS de teste não foi inicializado.');
-  }
-
-  return orm;
-}
-
-async function captureRejection(operation: Promise<unknown>): Promise<unknown> {
-  try {
-    await operation;
-  } catch (error: unknown) {
-    return error;
-  }
-
-  throw new Error('A operação de teste deveria ter falhado.');
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
-
-class SequenceIdGenerator implements IdGenerator {
-  public constructor(private readonly ids: string[]) {}
-
-  public generate(): string {
-    const id = this.ids.shift();
-
-    if (id === undefined) {
-      throw new Error('A sequência de IDs do teste WIN foi esgotada.');
-    }
-
-    return id;
-  }
+  return context.getOrm();
 }

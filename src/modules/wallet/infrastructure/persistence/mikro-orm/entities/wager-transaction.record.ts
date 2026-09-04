@@ -1,7 +1,13 @@
 import { DecimalType } from '@mikro-orm/core';
 import { Entity, PrimaryKey, Property } from '@mikro-orm/decorators/legacy';
 
-import type { WagerTransaction } from '../../../../domain/entities/wager-transaction.js';
+import {
+  WagerFailureCode,
+  WagerTransaction,
+  WagerTransactionKind,
+  WagerTransactionStatus,
+} from '../../../../domain/entities/wager-transaction.js';
+import { Money } from '../../../../domain/value-objects/money.js';
 
 @Entity({ tableName: 'wager_transactions' })
 export class WagerTransactionRecord {
@@ -87,12 +93,39 @@ export class WagerTransactionRecord {
     this.status = transaction.status;
     this.amount = transaction.money.toString();
     this.currency = transaction.money.currency;
-    this.referenceExternalTransactionId = undefined;
-    this.referenceTransactionId = undefined;
+    this.referenceExternalTransactionId =
+      transaction.referenceExternalTransactionId;
+    this.referenceTransactionId = transaction.referenceTransactionId;
     this.failureCode = transaction.failureCode;
     this.resultBalance = resultBalance.toString();
     this.resultCurrency = resultBalance.currency;
     this.createdAt = transaction.createdAt;
     this.processedAt = transaction.processedAt;
+  }
+
+  public toDomain(): WagerTransaction {
+    return WagerTransaction.rehydrate({
+      id: this.id,
+      providerId: this.providerId,
+      externalTransactionId: this.externalTransactionId,
+      idempotencyKey: this.idempotencyKey,
+      payloadHash: this.payloadHash,
+      referenceExternalTransactionId: this.referenceExternalTransactionId,
+      referenceTransactionId: this.referenceTransactionId,
+      walletId: this.walletId,
+      playerId: this.playerId,
+      roundId: this.roundId,
+      gameId: this.gameId,
+      kind: this.kind as WagerTransactionKind,
+      status: this.status as WagerTransactionStatus,
+      money: Money.from({ amount: this.amount, currency: this.currency }),
+      resultBalance: Money.from({
+        amount: this.resultBalance,
+        currency: this.resultCurrency,
+      }),
+      failureCode: this.failureCode as WagerFailureCode | undefined,
+      createdAt: this.createdAt,
+      processedAt: this.processedAt,
+    });
   }
 }

@@ -136,10 +136,28 @@ saldo, mas não altera saldo ou versão e não cria ledger. Somente a transaçã
 PostgreSQL impede a inclusão de ledger para `LOSS` e valida status, valor e
 direção para os tipos financeiros já suportados.
 
-Referências externas ainda são rejeitadas pelo contrato HTTP desta fase para que
-não sejam silenciosamente ignoradas. `REFUND`, `ROLLBACK` e o suporte de referência
-opcional em `WIN` serão introduzidos junto às regras completas de escopo e
-reprocessamento fora de ordem.
+Referências continuam proibidas em `BET` e `LOSS`. `WIN` aceita uma referência
+opcional a uma `BET` processada no mesmo escopo.
+
+## Referências, REFUND e ROLLBACK
+
+A referência externa é resolvida por `(providerId,
+referenceExternalTransactionId)`. Uma referência encontrada precisa pertencer
+ao mesmo player, Wallet, moeda e rodada. `REFUND` aceita apenas `BET`; `ROLLBACK`
+aceita `BET`, `WIN` ou `REFUND`. As reversões são integrais: seu `Money` precisa
+ser exatamente igual ao da transação referenciada.
+
+`REFUND` credita o valor da `BET`. `ROLLBACK` aplica o efeito inverso: credita ao
+referenciar `BET` e debita ao referenciar `WIN` ou `REFUND`. Um débito de rollback
+que deixaria saldo negativo é `REJECTED` com
+`ROLLBACK_INSUFFICIENT_FUNDS`. Referência existente, mas inválida, também é
+persistida como rejeição auditável, sem alterar Wallet ou ledger.
+
+O lock pessimista da Wallet serializa a consulta de duplicidade e o efeito
+financeiro. Um índice parcial único impede mais de uma reversão `PROCESSED` do
+mesmo tipo para a mesma referência. A migration também valida a direção do
+ledger de acordo com o tipo da transação e, no caso de `ROLLBACK`, com o tipo da
+referência.
 
 ## Idempotência
 
@@ -184,9 +202,13 @@ andamento ou devolverá a visibilidade da mensagem.
 
 ## Referências fora de ordem
 
-Uma referência ainda inexistente para `REFUND` ou `ROLLBACK` será persistida como
-`PENDING_REFERENCE`. Um worker agendado fará novas tentativas com backoff
-exponencial limitado. Os limites de tentativas e de TTL serão configurações
+Uma referência ainda inexistente para `WIN`, `REFUND` ou `ROLLBACK` é persistida
+como `PENDING_REFERENCE`, junto ao evento
+`WagerTransactionPendingReference` na outbox. O HTTP distingue essa aceitação
+assíncrona com status `202`, e o replay devolve o mesmo resultado persistido.
+
+O worker agendado de reprocessamento pertence à próxima fase. Ele fará novas
+tentativas com backoff exponencial limitado; tentativas e TTL serão configurações
 explícitas. Ao esgotá-los, a transação será rejeitada de forma auditável, com
 `failureCode` estável e o evento correspondente na outbox.
 

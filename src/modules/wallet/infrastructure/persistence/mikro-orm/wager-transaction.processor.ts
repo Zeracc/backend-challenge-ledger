@@ -9,8 +9,8 @@ import type {
 import {
   WagerFailureCode,
   WagerTransactionKind,
+  WagerTransactionStatus,
   type WagerTransaction,
-  type WagerTransactionStatus,
 } from '../../../domain/entities/wager-transaction.js';
 import type { Wallet } from '../../../domain/entities/wallet.js';
 import {
@@ -26,6 +26,7 @@ import {
   WalletPlayerMismatchError,
 } from '../../../domain/errors/wallet.errors.js';
 import {
+  WagerTransactionPendingReferenceEvent,
   WagerTransactionProcessedEvent,
   WagerTransactionRejectedEvent,
   WalletBalanceChangedEvent,
@@ -133,17 +134,65 @@ export class MikroOrmWagerTransactionProcessor implements WagerTransactionProces
     }
 
     const wallet = walletRecord.toDomain();
+    const reference = await this.findReference(entityManager, transaction);
+
+    if (
+      transaction.referenceExternalTransactionId !== undefined &&
+      reference === undefined
+    ) {
+      return this.processPendingReference(
+        entityManager,
+        wallet,
+        command,
+        external,
+      );
+    }
+
+    if (reference !== undefined) {
+      const referenceFailure = transaction.referenceFailureFor(reference);
+
+      if (referenceFailure !== undefined) {
+        return this.processRejected(
+          entityManager,
+          wallet,
+          command,
+          external,
+          referenceFailure,
+          reference.id,
+        );
+      }
+
+      if (
+        isReversal(transaction.kind) &&
+        (await this.hasProcessedReversal(
+          entityManager,
+          reference.id,
+          transaction.kind,
+        ))
+      ) {
+        return this.processRejected(
+          entityManager,
+          wallet,
+          command,
+          external,
+          WagerFailureCode.DuplicateReversal,
+          reference.id,
+        );
+      }
+    }
 
     switch (transaction.kind) {
       case WagerTransactionKind.Bet:
-        return this.processBet(
+        return this.processDebit(
           entityManager,
           walletRecord,
           wallet,
           command,
           external,
+          WagerFailureCode.InsufficientFunds,
         );
       case WagerTransactionKind.Win:
+      case WagerTransactionKind.Refund:
         return this.processBalanceChange(
           entityManager,
           walletRecord,
@@ -152,9 +201,19 @@ export class MikroOrmWagerTransactionProcessor implements WagerTransactionProces
           LedgerDirection.Credit,
           command,
           external,
+          reference,
         );
       case WagerTransactionKind.Loss:
         return this.processLoss(entityManager, wallet, command, external);
+      case WagerTransactionKind.Rollback:
+        return this.processRollback(
+          entityManager,
+          walletRecord,
+          wallet,
+          command,
+          external,
+          requireReference(reference),
+        );
       default:
         throw new Error(
           `O processador não suporta transações ${transaction.kind}.`,
@@ -162,12 +221,76 @@ export class MikroOrmWagerTransactionProcessor implements WagerTransactionProces
     }
   }
 
-  private async processBet(
+  private async findReference(
+    entityManager: EntityManager,
+    transaction: WagerTransaction,
+  ): Promise<WagerTransaction | undefined> {
+    if (transaction.referenceExternalTransactionId === undefined) {
+      return undefined;
+    }
+
+    const record = await entityManager.findOne(WagerTransactionRecord, {
+      providerId: transaction.providerId,
+      externalTransactionId: transaction.referenceExternalTransactionId,
+    });
+
+    return record?.toDomain();
+  }
+
+  private async hasProcessedReversal(
+    entityManager: EntityManager,
+    referenceTransactionId: string,
+    kind: WagerTransactionKind,
+  ): Promise<boolean> {
+    return (
+      (await entityManager.findOne(WagerTransactionRecord, {
+        referenceTransactionId,
+        kind,
+        status: WagerTransactionStatus.Processed,
+      })) !== null
+    );
+  }
+
+  private async processRollback(
     entityManager: EntityManager,
     walletRecord: WalletRecord,
     wallet: Wallet,
     command: ProcessWagerTransactionCommand,
     external: ExternalIdentity,
+    reference: WagerTransaction,
+  ): Promise<ProcessWagerTransactionResult> {
+    if (reference.kind === WagerTransactionKind.Bet) {
+      return this.processBalanceChange(
+        entityManager,
+        walletRecord,
+        wallet,
+        wallet.credit(command.transaction.money, command.occurredAt),
+        LedgerDirection.Credit,
+        command,
+        external,
+        reference,
+      );
+    }
+
+    return this.processDebit(
+      entityManager,
+      walletRecord,
+      wallet,
+      command,
+      external,
+      WagerFailureCode.RollbackInsufficientFunds,
+      reference,
+    );
+  }
+
+  private async processDebit(
+    entityManager: EntityManager,
+    walletRecord: WalletRecord,
+    wallet: Wallet,
+    command: ProcessWagerTransactionCommand,
+    external: ExternalIdentity,
+    insufficientFundsCode: WagerFailureCode,
+    reference?: WagerTransaction,
   ): Promise<ProcessWagerTransactionResult> {
     try {
       return await this.processBalanceChange(
@@ -178,37 +301,21 @@ export class MikroOrmWagerTransactionProcessor implements WagerTransactionProces
         LedgerDirection.Debit,
         command,
         external,
+        reference,
       );
     } catch (error: unknown) {
       if (!(error instanceof InsufficientWalletFundsError)) {
         throw error;
       }
 
-      const transaction = command.transaction;
-      transaction.reject(WagerFailureCode.InsufficientFunds, wallet.balance);
-      const rejectedEvent = new WagerTransactionRejectedEvent({
-        eventId: command.rejectedEventId,
-        aggregateId: transaction.id,
-        correlationId: transaction.id,
-        occurredAt: command.occurredAt,
-        data: {
-          transactionId: transaction.id,
-          walletId: wallet.id,
-          playerId: wallet.playerId,
-          providerId: external.providerId,
-          externalTransactionId: external.externalTransactionId,
-          kind: transaction.kind,
-          money: transaction.money.toJSON(),
-          balance: wallet.balance.toJSON(),
-          failureCode: WagerFailureCode.InsufficientFunds,
-        },
-      });
-
-      entityManager.persist(new WagerTransactionRecord(transaction));
-      entityManager.persist(new OutboxMessageRecord(rejectedEvent));
-      await entityManager.flush();
-
-      return resultFromTransaction(transaction, false);
+      return this.processRejected(
+        entityManager,
+        wallet,
+        command,
+        external,
+        insufficientFundsCode,
+        reference?.id,
+      );
     }
   }
 
@@ -220,9 +327,14 @@ export class MikroOrmWagerTransactionProcessor implements WagerTransactionProces
     direction: LedgerDirection,
     command: ProcessWagerTransactionCommand,
     external: ExternalIdentity,
+    reference?: WagerTransaction,
   ): Promise<ProcessWagerTransactionResult> {
     const transaction = command.transaction;
-    transaction.markProcessed(updatedWallet.balance, command.occurredAt);
+    transaction.markProcessed(
+      updatedWallet.balance,
+      command.occurredAt,
+      reference?.id,
+    );
     walletRecord.apply(updatedWallet);
 
     const ledgerEntry = WalletLedgerEntry.create({
@@ -296,6 +408,90 @@ export class MikroOrmWagerTransactionProcessor implements WagerTransactionProces
     return resultFromTransaction(transaction, false);
   }
 
+  private async processPendingReference(
+    entityManager: EntityManager,
+    wallet: Wallet,
+    command: ProcessWagerTransactionCommand,
+    external: ExternalIdentity,
+  ): Promise<ProcessWagerTransactionResult> {
+    const transaction = command.transaction;
+    const referenceExternalTransactionId =
+      transaction.referenceExternalTransactionId;
+
+    if (referenceExternalTransactionId === undefined) {
+      throw new Error('A transação pendente não possui referência externa.');
+    }
+
+    transaction.markPendingReference(wallet.balance);
+    const event = new WagerTransactionPendingReferenceEvent({
+      eventId: command.rejectedEventId,
+      aggregateId: transaction.id,
+      correlationId: transaction.id,
+      occurredAt: command.occurredAt,
+      data: {
+        transactionId: transaction.id,
+        walletId: wallet.id,
+        playerId: wallet.playerId,
+        providerId: external.providerId,
+        externalTransactionId: external.externalTransactionId,
+        referenceExternalTransactionId,
+        kind: transaction.kind,
+        money: transaction.money.toJSON(),
+        balance: wallet.balance.toJSON(),
+      },
+    });
+
+    entityManager.persist(new WagerTransactionRecord(transaction));
+    entityManager.persist(new OutboxMessageRecord(event));
+    await entityManager.flush();
+
+    return resultFromTransaction(transaction, false);
+  }
+
+  private async processRejected(
+    entityManager: EntityManager,
+    wallet: Wallet,
+    command: ProcessWagerTransactionCommand,
+    external: ExternalIdentity,
+    failureCode: WagerFailureCode,
+    referenceTransactionId?: string,
+  ): Promise<ProcessWagerTransactionResult> {
+    const transaction = command.transaction;
+    transaction.reject(failureCode, wallet.balance, referenceTransactionId);
+    const event = new WagerTransactionRejectedEvent({
+      eventId: command.rejectedEventId,
+      aggregateId: transaction.id,
+      correlationId: transaction.id,
+      occurredAt: command.occurredAt,
+      data: {
+        transactionId: transaction.id,
+        walletId: wallet.id,
+        playerId: wallet.playerId,
+        providerId: external.providerId,
+        externalTransactionId: external.externalTransactionId,
+        ...(transaction.referenceExternalTransactionId === undefined
+          ? {}
+          : {
+              referenceExternalTransactionId:
+                transaction.referenceExternalTransactionId,
+            }),
+        ...(referenceTransactionId === undefined
+          ? {}
+          : { referenceTransactionId }),
+        kind: transaction.kind,
+        money: transaction.money.toJSON(),
+        balance: wallet.balance.toJSON(),
+        failureCode,
+      },
+    });
+
+    entityManager.persist(new WagerTransactionRecord(transaction));
+    entityManager.persist(new OutboxMessageRecord(event));
+    await entityManager.flush();
+
+    return resultFromTransaction(transaction, false);
+  }
+
   private resolveReplay(
     record: WagerTransactionRecord,
     payloadHash: string | undefined,
@@ -346,6 +542,23 @@ function requireExternalIdentity(
   };
 }
 
+function requireReference(
+  reference: WagerTransaction | undefined,
+): WagerTransaction {
+  if (reference === undefined) {
+    throw new Error('A reversão não possui uma referência resolvida.');
+  }
+
+  return reference;
+}
+
+function isReversal(kind: WagerTransactionKind): boolean {
+  return (
+    kind === WagerTransactionKind.Refund ||
+    kind === WagerTransactionKind.Rollback
+  );
+}
+
 function createProcessedEvent(
   transaction: WagerTransaction,
   wallet: Wallet,
@@ -365,6 +578,15 @@ function createProcessedEvent(
       playerId: wallet.playerId,
       providerId: external.providerId,
       externalTransactionId: external.externalTransactionId,
+      ...(transaction.referenceExternalTransactionId === undefined
+        ? {}
+        : {
+            referenceExternalTransactionId:
+              transaction.referenceExternalTransactionId,
+          }),
+      ...(transaction.referenceTransactionId === undefined
+        ? {}
+        : { referenceTransactionId: transaction.referenceTransactionId }),
       kind: transaction.kind,
       money: transaction.money.toJSON(),
       balanceAfter: balanceAfter.toJSON(),
@@ -379,7 +601,7 @@ function resultFromTransaction(
   const balance = transaction.resultBalance;
 
   if (balance === undefined) {
-    throw new Error('A transação terminal não possui saldo resultante.');
+    throw new Error('A transação persistida não possui saldo resultante.');
   }
 
   return {
