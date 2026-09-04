@@ -74,6 +74,26 @@ de serialização financeira e é naturalmente compartilhado por todas as instâ
 da aplicação. A contenção dos locks será medida. Retentativas limitadas serão
 reservadas para falhas transitórias do banco, nunca para rejeições de negócio.
 
+## Abertura de wallet
+
+A abertura é a primeira fatia vertical implementada. Uma wallet com saldo zero
+é persistida sem movimentação financeira. Quando o saldo inicial é positivo, o
+caso de uso constrói um pacote indivisível com:
+
+- wallet na versão `1`;
+- transação interna `OPENING` já processada;
+- lançamento `CREDIT` partindo de zero;
+- eventos `WagerTransactionProcessed` e `WalletBalanceChanged` na outbox.
+
+O adaptador PostgreSQL persiste o pacote em uma única transação. Flushes internos
+são ordenados pelas foreign keys, mas nenhum deles realiza commit isolado. Uma
+falha em qualquer etapa reverte wallet, transação, ledger e outbox.
+
+O schema reforça saldo não negativo, unicidade por player e moeda, coerência de
+identidade entre wallet, transação e ledger, aritmética do lançamento e um único
+lançamento por wallet e transação. Trigger no PostgreSQL rejeita `UPDATE` e
+`DELETE` no ledger.
+
 ## Idempotência
 
 O header `Idempotency-Key` representa a identidade de um comando HTTP. Para o
@@ -125,9 +145,9 @@ explícitas. Ao esgotá-los, a transação será rejeitada de forma auditável, 
 
 ## Decisão sobre autenticação
 
-A autenticação não pontua no desafio e não deve deslocar as garantias P0. A
-implementação inicial disponibilizará uma `ProviderIdentityPort` com adaptador
-no-op para o desenvolvimento local. Em produção, essa porta validaria um provedor
+A autenticação não pontua no desafio e não deve deslocar as garantias P0. Os
+endpoints de negócio usam inicialmente um `NoOpAuthGuard`, deixando explícito o
+ponto de substituição. Em produção, esse guard delegaria a validação a um provedor
 OIDC externo, como Keycloak ou Zitadel.
 
 Os endpoints de health permanecerão públicos. O SQS será tratado como canal

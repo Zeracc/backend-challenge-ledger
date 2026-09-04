@@ -20,3 +20,9 @@ Thumbs.db
 
 # TypeScript
 *.tsbuildinfo
+/mikro-orm.config.d.ts
+/mikro-orm.config.js
+/mikro-orm.config.js.map
+
+# MikroORM local metadata
+/.snapshot-*.json

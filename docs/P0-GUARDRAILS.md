@@ -36,3 +36,18 @@ P0 conhecido.
 - **P0-1:** `money.spec.ts` cobre formato, precisão, operações, imutabilidade e
   conflito de moeda; `money-postgresql.integration.spec.ts` comprova round trips
   exatos em `NUMERIC(20, 2)` contra PostgreSQL real, incluindo o limite máximo.
+- **P0-2 (parcial):** o schema rejeita saldo negativo; a disputa concorrente por
+  saldo insuficiente permanece pendente até a implementação de `BET`.
+- **P0-3 (parcial):** o schema limita o ledger a uma entrada por wallet e
+  transação; duplicatas concorrentes de apostas permanecem pendentes.
+- **P0-5 (parcial):** a unicidade de abertura foi comprovada por 12 chamadas em
+  três conexões PostgreSQL independentes; a prova em três processos permanece
+  pendente para o processamento de apostas.
+- **P0-6 (parcial):** os eventos de abertura são incluídos na outbox dentro da
+  transação financeira; publicação, leases e recuperação após queda permanecem
+  pendentes.
+- **P0-7 (parcial):** a abertura grava wallet, `OPENING` e ledger atomicamente;
+  constraints validam a aritmética e um trigger rejeita atualização e exclusão.
+  Os demais cenários financeiros ainda precisam da mesma prova de reconciliação.
+- **P0-8 (parcial):** migrations, constraints, atomicidade e concorrência desta
+  fase são testadas em PostgreSQL real. A comprovação com SQS permanece pendente.

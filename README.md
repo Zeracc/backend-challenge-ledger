@@ -17,11 +17,14 @@ de valor do domínio:
 - infraestrutura local com PostgreSQL e LocalStack por Docker Compose;
 - `Money` imutável, multi-moeda e sem aritmética de ponto flutuante;
 - teste de round trip monetário contra PostgreSQL real;
+- abertura de Wallet com `OPENING`, ledger e outbox atômicos;
+- migration reversível com constraints financeiras no PostgreSQL;
+- endpoint `POST /wallets` com respostas `201`, `400` e `409`;
 - documentos de arquitetura e rastreabilidade dos critérios de aceite.
 
-O processamento financeiro ainda não foi implementado. Cada capacidade somente
-será marcada como concluída após a comprovação de suas garantias por testes
-unitários, de integração e de concorrência.
+O processamento das transações de aposta ainda não foi implementado. Cada
+capacidade somente será marcada como concluída após a comprovação de suas
+garantias por testes unitários, de integração e de concorrência.
 
 ## Pré-requisitos
 
@@ -50,12 +53,32 @@ Em seguida:
 ```bash
 bun install --frozen-lockfile
 docker compose up -d postgres localstack
+bun run db:migrate
 bun run start:dev
 ```
 
 O endpoint de liveness estará disponível em
 `GET http://localhost:3000/health/live`. O endpoint de readiness será adicionado
 junto aos adaptadores do PostgreSQL e do SQS.
+
+Para subir a API por Docker, o serviço one-shot `migrate` aplica as migrations
+antes da inicialização:
+
+```bash
+docker compose up --build api
+```
+
+### Criar uma wallet
+
+```http
+POST /wallets
+Content-Type: application/json
+
+{
+  "playerId": "0192f28f-5dc0-7d58-bdb2-814ad6a0f4a1",
+  "initialBalance": { "amount": "1000.00", "currency": "BRL" }
+}
+```
 
 ## Verificações de qualidade
 
@@ -68,6 +91,9 @@ bun run test:integration
 bun run build
 docker compose config --quiet
 ```
+
+Os testes de integração exigem o PostgreSQL ativo e criam schemas isolados que
+são removidos ao final da execução.
 
 ## Documentação
 
