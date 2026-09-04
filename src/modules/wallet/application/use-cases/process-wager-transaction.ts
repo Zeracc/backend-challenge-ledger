@@ -15,7 +15,9 @@ import type {
 export type ProcessableWagerTransactionKind =
   | WagerTransactionKind.Bet
   | WagerTransactionKind.Win
-  | WagerTransactionKind.Loss;
+  | WagerTransactionKind.Loss
+  | WagerTransactionKind.Refund
+  | WagerTransactionKind.Rollback;
 
 export interface ProcessWagerTransactionInput {
   idempotencyKey: string;
@@ -26,6 +28,7 @@ export interface ProcessWagerTransactionInput {
   roundId: string;
   gameId: string;
   kind: ProcessableWagerTransactionKind;
+  referenceExternalTransactionId?: string;
   money: MoneyProps;
 }
 
@@ -52,6 +55,12 @@ export class ProcessWagerTransactionUseCase {
       roundId: input.roundId,
       gameId: input.gameId,
       kind: input.kind,
+      ...(input.referenceExternalTransactionId === undefined
+        ? {}
+        : {
+            referenceExternalTransactionId:
+              input.referenceExternalTransactionId,
+          }),
       money: money.toJSON(),
     });
     const props: CreateExternalTransactionProps = {
@@ -60,6 +69,12 @@ export class ProcessWagerTransactionUseCase {
       externalTransactionId: input.externalTransactionId,
       idempotencyKey: input.idempotencyKey,
       payloadHash,
+      ...(input.referenceExternalTransactionId === undefined
+        ? {}
+        : {
+            referenceExternalTransactionId:
+              input.referenceExternalTransactionId,
+          }),
       walletId: input.walletId,
       playerId: input.playerId,
       roundId: input.roundId,
@@ -91,5 +106,9 @@ function createTransaction(
       return WagerTransaction.createWin(props);
     case WagerTransactionKind.Loss:
       return WagerTransaction.createLoss(props);
+    case WagerTransactionKind.Refund:
+      return WagerTransaction.createRefund(props);
+    case WagerTransactionKind.Rollback:
+      return WagerTransaction.createRollback(props);
   }
 }

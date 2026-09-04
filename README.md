@@ -3,8 +3,8 @@
 Processador distribuído de transações de apostas desenvolvido para o desafio
 técnico de backend da Jungle Gaming.
 
-> A solução está em desenvolvimento. O enunciado original do desafio foi
-> preservado integralmente em [`docs/CHALLENGE.md`](docs/CHALLENGE.md).
+> A solução está em desenvolvimento. A documentação complementar e o enunciado
+> preservado serão incluídos na entrega final.
 
 ## Estado atual
 
@@ -23,13 +23,16 @@ concorrente de apostas:
 - processamento de `BET` com lock por Wallet no PostgreSQL;
 - processamento de `WIN` com crédito, ledger e outbox atômicos;
 - processamento de `LOSS` sem alteração de saldo, versão ou ledger;
+- referência opcional de `WIN` a uma `BET` da mesma rodada;
+- `REFUND` integral de `BET` e `ROLLBACK` com efeito financeiro inverso;
+- referências ausentes persistidas como `PENDING_REFERENCE`, com resposta `202`;
 - idempotência persistente por chave e hash canônico SHA-256;
 - rejeição auditável por saldo insuficiente, sem lançamento no ledger;
 - endpoint `POST /wagering/transactions` com replay e conflitos distintos;
 - testes de 50 duplicatas concorrentes em três processos Bun;
 - documentos de arquitetura e rastreabilidade dos critérios de aceite.
 
-Referências opcionais de `WIN`, `REFUND`, `ROLLBACK`, SQS e o publisher da outbox
+O reprocessamento agendado de `PENDING_REFERENCE`, SQS e o publisher da outbox
 ainda não foram implementados. Cada capacidade somente será marcada como
 concluída após a comprovação de suas garantias por testes unitários, de integração
 e de concorrência.
@@ -107,8 +110,10 @@ Content-Type: application/json
 }
 ```
 
-O mesmo contrato aceita `WIN` e `LOSS`. Nesta fase, campos de referência externa
-ainda são rejeitados explicitamente.
+O mesmo contrato aceita `WIN`, `LOSS`, `REFUND` e `ROLLBACK`. `WIN` aceita
+`referenceExternalTransactionId` opcional; as duas reversões o exigem. Quando a
+referência ainda não existe, a API persiste a solicitação e responde `202` com
+status `PENDING_REFERENCE`. `REFUND` e `ROLLBACK` são sempre integrais.
 
 ## Verificações de qualidade
 
@@ -129,9 +134,9 @@ são removidos ao final da execução.
 
 - [`ARCHITECTURE.md`](ARCHITECTURE.md): fronteiras, estratégia de consistência e
   trade-offs.
-- [`docs/ACCEPTANCE-CRITERIA.md`](docs/ACCEPTANCE-CRITERIA.md): rastreabilidade
-  entre requisitos, implementação e evidências.
-- [`docs/CHALLENGE.md`](docs/CHALLENGE.md): enunciado original da Jungle Gaming.
+
+A rastreabilidade completa dos critérios de aceite e o enunciado preservado
+serão adicionados na entrega final.
 
 ## Fluxo de entrega
 

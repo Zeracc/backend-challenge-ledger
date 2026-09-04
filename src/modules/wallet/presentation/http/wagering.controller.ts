@@ -5,6 +5,8 @@ import {
   Controller,
   Headers,
   HttpCode,
+  HttpException,
+  HttpStatus,
   NotFoundException,
   Post,
   UnprocessableEntityException,
@@ -61,9 +63,13 @@ export class WageringController {
         throw new UnprocessableEntityException(result);
       }
 
+      if (result.status === WagerTransactionStatus.PendingReference) {
+        throw new HttpException(result, HttpStatus.ACCEPTED);
+      }
+
       return result;
     } catch (error: unknown) {
-      if (error instanceof UnprocessableEntityException) {
+      if (error instanceof HttpException) {
         throw error;
       }
 
@@ -135,7 +141,8 @@ function parseProcessWagerTransactionInput(
     !isBoundedString(roundId, 150) ||
     !isBoundedString(gameId, 150) ||
     !isProcessableKind(kind) ||
-    referenceExternalTransactionId !== undefined ||
+    (referenceExternalTransactionId !== undefined &&
+      !isBoundedString(referenceExternalTransactionId, 150)) ||
     typeof amount !== 'string' ||
     typeof currency !== 'string'
   ) {
@@ -151,6 +158,9 @@ function parseProcessWagerTransactionInput(
     roundId,
     gameId,
     kind,
+    ...(referenceExternalTransactionId === undefined
+      ? {}
+      : { referenceExternalTransactionId }),
     money: { amount, currency },
   };
 }
@@ -161,7 +171,9 @@ function isProcessableKind(
   return (
     value === WagerTransactionKind.Bet ||
     value === WagerTransactionKind.Win ||
-    value === WagerTransactionKind.Loss
+    value === WagerTransactionKind.Loss ||
+    value === WagerTransactionKind.Refund ||
+    value === WagerTransactionKind.Rollback
   );
 }
 
@@ -184,6 +196,6 @@ function invalidRequest(): BadRequestException {
   return new BadRequestException({
     code: 'INVALID_WAGER_REQUEST',
     message:
-      'Informe Idempotency-Key e um payload BET, WIN ou LOSS válido com identificadores, Money e UUIDs; referências externas ainda não são aceitas.',
+      'Informe Idempotency-Key e um payload BET, WIN, LOSS, REFUND ou ROLLBACK válido com identificadores, Money, UUIDs e referência quando exigida.',
   });
 }

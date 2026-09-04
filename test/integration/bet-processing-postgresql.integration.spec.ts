@@ -1,61 +1,32 @@
 import { randomUUID } from 'node:crypto';
-import { fileURLToPath } from 'node:url';
 
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
-import type { MikroORM, PostgreSqlConnection } from '@mikro-orm/postgresql';
+import type { MikroORM } from '@mikro-orm/postgresql';
 
-import {
+import type {
   ProcessWagerTransactionUseCase,
-  type ProcessWagerTransactionInput,
+  ProcessWagerTransactionInput,
 } from '../../src/modules/wallet/application/use-cases/process-wager-transaction.js';
-import { OpenWalletUseCase } from '../../src/modules/wallet/application/use-cases/open-wallet.js';
 import {
   WagerFailureCode,
   WagerTransactionKind,
   WagerTransactionStatus,
 } from '../../src/modules/wallet/domain/entities/wager-transaction.js';
 import { IdempotencyConflictError } from '../../src/modules/wallet/domain/errors/wallet.errors.js';
-import { MikroOrmWagerTransactionProcessor } from '../../src/modules/wallet/infrastructure/persistence/mikro-orm/wager-transaction.processor.js';
-import { MikroOrmWalletOpeningRepository } from '../../src/modules/wallet/infrastructure/persistence/mikro-orm/wallet-opening.repository.js';
 import type { IdGenerator } from '../../src/shared/application/ports/id-generator.js';
-import { SystemClock } from '../../src/shared/infrastructure/system/system-clock.js';
-import { UuidGenerator } from '../../src/shared/infrastructure/system/uuid-generator.js';
-import { Sha256PayloadHasher } from '../../src/shared/infrastructure/serialization/sha256-payload-hasher.js';
-import { createWalletTestOrm } from './support/wallet-test-orm.js';
+import {
+  SequenceIdGenerator,
+  WagerTestContext,
+  captureRejection,
+} from './support/wager-test-context.js';
 
-interface CountRow {
-  count: number;
-}
-
-interface WalletRow {
-  balance: string;
-  version: number;
-}
-
-const schemaName = `bet_test_${randomUUID().replaceAll('-', '')}`;
-const secondaryOrms: MikroORM[] = [];
-let orm: MikroORM | undefined;
+const context = new WagerTestContext(
+  `bet_test_${randomUUID().replaceAll('-', '')}`,
+);
 
 describe('BET processing with PostgreSQL', () => {
-  beforeAll(async () => {
-    orm = await createWalletTestOrm(schemaName, true);
-  });
-
-  afterAll(async () => {
-    await Promise.all(
-      secondaryOrms.map(async (instance) => instance.close(true)),
-    );
-
-    if (orm === undefined) {
-      return;
-    }
-
-    await orm.migrator.down({ schema: schemaName, to: 0 });
-    await orm.em
-      .getConnection()
-      .execute(`drop schema if exists "${schemaName}" cascade`);
-    await orm.close(true);
-  });
+  beforeAll(async () => context.start());
+  afterAll(async () => context.stop());
 
   it('debita a wallet e grava transação, ledger e dois eventos atomicamente', async () => {
     const playerId = randomUUID();
@@ -291,52 +262,27 @@ async function openWallet(
   playerId: string,
   amount: string,
 ): Promise<{ id: string }> {
-  return new OpenWalletUseCase(
-    new MikroOrmWalletOpeningRepository(getOrm().em.fork()),
-    new UuidGenerator(),
-    new SystemClock(),
-  ).execute({
-    playerId,
-    initialBalance: { amount, currency: 'BRL' },
-  });
+  return context.openWallet(playerId, amount);
 }
 
 function createBetUseCase(
   instance: MikroORM,
-  idGenerator: IdGenerator = new UuidGenerator(),
+  idGenerator?: IdGenerator,
 ): ProcessWagerTransactionUseCase {
-  return new ProcessWagerTransactionUseCase(
-    new MikroOrmWagerTransactionProcessor(instance.em.fork()),
-    idGenerator,
-    new SystemClock(),
-    new Sha256PayloadHasher(),
-  );
+  return context.createUseCase(instance, idGenerator);
 }
 
 async function threeIndependentUseCases(): Promise<
   ProcessWagerTransactionUseCase[]
 > {
-  const instances = await Promise.all([
-    createWalletTestOrm(schemaName, false),
-    createWalletTestOrm(schemaName, false),
-    createWalletTestOrm(schemaName, false),
-  ]);
-  secondaryOrms.push(...instances);
-
-  return instances.map((instance) => createBetUseCase(instance));
+  return context.independentUseCases(3);
 }
 
 function requiredUseCase(
   useCases: ProcessWagerTransactionUseCase[],
   index: number,
 ): ProcessWagerTransactionUseCase {
-  const useCase = useCases[index % useCases.length];
-
-  if (useCase === undefined) {
-    throw new Error('Caso de uso BET concorrente não encontrado.');
-  }
-
-  return useCase;
+  return context.requiredUseCase(useCases, index);
 }
 
 function betInput(
@@ -344,160 +290,38 @@ function betInput(
   playerId: string,
   amount: string,
 ): ProcessWagerTransactionInput {
-  const externalTransactionId = randomUUID();
-
-  return {
-    idempotencyKey: `provider-a:${externalTransactionId}`,
-    providerId: 'provider-a',
-    externalTransactionId,
-    playerId,
+  return context.wagerInput(
+    WagerTransactionKind.Bet,
     walletId,
-    roundId: 'round-1',
-    gameId: 'game-1',
-    kind: WagerTransactionKind.Bet,
-    money: { amount, currency: 'BRL' },
-  };
-}
-
-async function walletState(walletId: string): Promise<WalletRow | undefined> {
-  const rows = await connection().execute<WalletRow[]>(
-    `select "balance", "version" from "${schemaName}"."wallets" where "id" = ?`,
-    [walletId],
+    playerId,
+    amount,
   );
-
-  return rows[0];
 }
+
+const walletState = context.walletState.bind(context);
 
 async function countBetTransactions(walletId: string): Promise<number> {
-  return count(
-    `select count(*)::int as "count" from "${schemaName}"."wager_transactions" where "wallet_id" = ? and "kind" = 'BET'`,
-    [walletId],
-  );
+  return context.countTransactions(walletId, WagerTransactionKind.Bet);
 }
 
 async function countBetLedgerEntries(walletId: string): Promise<number> {
-  return count(
-    `select count(*)::int as "count" from "${schemaName}"."wallet_ledger_entries" l join "${schemaName}"."wager_transactions" t on t.id = l.transaction_id where l.wallet_id = ? and t.kind = 'BET'`,
-    [walletId],
-  );
+  return context.countLedgerEntries(walletId, WagerTransactionKind.Bet);
 }
 
 async function countTransactionOutbox(transactionId: string): Promise<number> {
-  return count(
-    `select count(*)::int as "count" from "${schemaName}"."outbox_messages" where "payload"->>'correlationId' = ?`,
-    [transactionId],
-  );
+  return context.countTransactionOutbox(transactionId);
 }
 
-async function findOpeningOutboxId(walletId: string): Promise<string> {
-  const rows = await connection().execute<Array<{ id: string }>>(
-    `select "id" from "${schemaName}"."outbox_messages" where "payload"->'data'->>'walletId' = ? limit 1`,
-    [walletId],
-  );
-  const id = rows[0]?.id;
-
-  if (id === undefined) {
-    throw new Error(
-      'Evento de abertura não encontrado para o teste de rollback.',
-    );
-  }
-
-  return id;
-}
-
-async function count(query: string, parameters: unknown[]): Promise<number> {
-  const rows = await connection().execute<CountRow[]>(query, parameters);
-
-  return rows[0]?.count ?? 0;
-}
-
-async function expectReconciled(walletId: string): Promise<void> {
-  const rows = await connection().execute<
-    Array<{ ledgerBalance: string; walletBalance: string }>
-  >(
-    `
-      select
-        w.balance as "walletBalance",
-        coalesce(sum(case l.direction when 'CREDIT' then l.amount when 'DEBIT' then -l.amount end), 0)::numeric(20, 2) as "ledgerBalance"
-      from "${schemaName}"."wallets" w
-      left join "${schemaName}"."wallet_ledger_entries" l on l.wallet_id = w.id
-      where w.id = ?
-      group by w.id
-    `,
-    [walletId],
-  );
-
-  expect(rows[0]?.walletBalance).toBe(rows[0]?.ledgerBalance);
-}
-
-function connection(): PostgreSqlConnection {
-  return getOrm().em.getConnection();
-}
+const findOpeningOutboxId = context.findOpeningOutboxId.bind(context);
+const expectReconciled = context.expectReconciled.bind(context);
 
 function getOrm(): MikroORM {
-  if (orm === undefined) {
-    throw new Error('O ORM BET de teste não foi inicializado.');
-  }
-
-  return orm;
-}
-
-interface WorkerResult {
-  transactionId: string;
-  idempotentReplay: boolean;
+  return context.getOrm();
 }
 
 async function runBetWorker(
   input: ProcessWagerTransactionInput,
   attempts: number,
-): Promise<WorkerResult[]> {
-  const workerPath = fileURLToPath(
-    new URL('./fixtures/wager-process-worker.ts', import.meta.url),
-  );
-  const child = Bun.spawn([process.execPath, workerPath], {
-    cwd: process.cwd(),
-    env: {
-      ...process.env,
-      WAGER_WORKER_SCHEMA: schemaName,
-      WAGER_WORKER_INPUT: JSON.stringify(input),
-      WAGER_WORKER_ATTEMPTS: attempts.toString(),
-    },
-    stdout: 'pipe',
-    stderr: 'pipe',
-  });
-  const [exitCode, stdout, stderr] = await Promise.all([
-    child.exited,
-    new Response(child.stdout).text(),
-    new Response(child.stderr).text(),
-  ]);
-
-  if (exitCode !== 0) {
-    throw new Error(`Worker BET terminou com código ${exitCode}: ${stderr}`);
-  }
-
-  return JSON.parse(stdout) as WorkerResult[];
-}
-
-async function captureRejection(operation: Promise<unknown>): Promise<unknown> {
-  try {
-    await operation;
-  } catch (error: unknown) {
-    return error;
-  }
-
-  throw new Error('A operação de teste deveria ter falhado.');
-}
-
-class SequenceIdGenerator implements IdGenerator {
-  public constructor(private readonly ids: string[]) {}
-
-  public generate(): string {
-    const id = this.ids.shift();
-
-    if (id === undefined) {
-      throw new Error('A sequência de IDs do teste BET foi esgotada.');
-    }
-
-    return id;
-  }
+): ReturnType<WagerTestContext['runWagerWorker']> {
+  return context.runWagerWorker(input, attempts);
 }

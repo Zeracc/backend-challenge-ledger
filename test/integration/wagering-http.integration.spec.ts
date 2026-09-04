@@ -179,15 +179,49 @@ describe('POST /wagering/transactions', () => {
     expect((await postTransaction(invalidBody, 'key')).status).toBe(400);
   });
 
-  it('não ignora referência enviada antes da fase de reversões', async () => {
+  it('responde 202 quando a referência ainda não existe', async () => {
+    const playerId = randomUUID();
+    const wallet = await requiredOpenWallet().execute({
+      playerId,
+      initialBalance: { amount: '100.00', currency: 'BRL' },
+    });
     const body = {
-      ...wagerBody('WIN', randomUUID(), randomUUID(), '25.00'),
+      ...wagerBody('WIN', wallet.id, playerId, '25.00'),
       referenceExternalTransactionId: 'bet-123',
     };
+    const response = await postTransaction(body, 'provider-a:win-123');
 
-    expect((await postTransaction(body, 'provider-a:win-123')).status).toBe(
-      400,
-    );
+    expect(response.status).toBe(202);
+    expect(await response.json()).toMatchObject({
+      status: 'PENDING_REFERENCE',
+      balance: { amount: '100.00', currency: 'BRL' },
+      idempotentReplay: false,
+    });
+  });
+
+  it('exige referência em REFUND e ROLLBACK', async () => {
+    const playerId = randomUUID();
+    const wallet = await requiredOpenWallet().execute({
+      playerId,
+      initialBalance: { amount: '100.00', currency: 'BRL' },
+    });
+
+    expect(
+      (
+        await postTransaction(
+          wagerBody('REFUND', wallet.id, playerId, '25.00'),
+          `provider-a:${randomUUID()}`,
+        )
+      ).status,
+    ).toBe(400);
+    expect(
+      (
+        await postTransaction(
+          wagerBody('ROLLBACK', wallet.id, playerId, '25.00'),
+          `provider-a:${randomUUID()}`,
+        )
+      ).status,
+    ).toBe(400);
   });
 });
 
@@ -199,6 +233,7 @@ interface WagerHttpBody {
   roundId: string;
   gameId: string;
   kind: string;
+  referenceExternalTransactionId?: string;
   money: { amount: string; currency: string };
 }
 
@@ -211,7 +246,7 @@ function betBody(
 }
 
 function wagerBody(
-  kind: 'BET' | 'WIN' | 'LOSS',
+  kind: 'BET' | 'WIN' | 'LOSS' | 'REFUND' | 'ROLLBACK',
   walletId: string,
   playerId: string,
   amount: string,
