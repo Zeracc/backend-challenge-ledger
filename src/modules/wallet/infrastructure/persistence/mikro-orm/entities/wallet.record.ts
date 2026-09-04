@@ -6,7 +6,8 @@ import {
   Unique,
 } from '@mikro-orm/decorators/legacy';
 
-import type { Wallet } from '../../../../domain/entities/wallet.js';
+import { Wallet } from '../../../../domain/entities/wallet.js';
+import { Money } from '../../../../domain/value-objects/money.js';
 
 @Entity({ tableName: 'wallets' })
 @Unique({
@@ -15,27 +16,31 @@ import type { Wallet } from '../../../../domain/entities/wallet.js';
 })
 export class WalletRecord {
   @PrimaryKey({ type: 'uuid' })
-  public id: string;
+  public id!: string;
 
   @Property({ type: 'uuid' })
-  public playerId: string;
+  public playerId!: string;
 
   @Property({ length: 3 })
-  public currency: string;
+  public currency!: string;
 
   @Property({ type: new DecimalType('string'), precision: 20, scale: 2 })
-  public balance: string;
+  public balance!: string;
 
   @Property({ type: 'integer' })
-  public version: number;
+  public version!: number;
 
   @Property({ columnType: 'timestamptz(3)' })
-  public createdAt: Date;
+  public createdAt!: Date;
 
   @Property({ columnType: 'timestamptz(3)' })
-  public updatedAt: Date;
+  public updatedAt!: Date;
 
   public constructor(wallet: Wallet) {
+    this.apply(wallet);
+  }
+
+  public apply(wallet: Wallet): void {
     this.id = wallet.id;
     this.playerId = wallet.playerId;
     this.currency = wallet.currency;
@@ -43,5 +48,17 @@ export class WalletRecord {
     this.version = wallet.version;
     this.createdAt = wallet.createdAt;
     this.updatedAt = wallet.updatedAt;
+  }
+
+  public toDomain(): Wallet {
+    return Wallet.rehydrate({
+      id: this.id,
+      playerId: this.playerId,
+      currency: this.currency,
+      balance: Money.from({ amount: this.balance, currency: this.currency }),
+      version: this.version,
+      createdAt: this.createdAt,
+      updatedAt: this.updatedAt,
+    });
   }
 }

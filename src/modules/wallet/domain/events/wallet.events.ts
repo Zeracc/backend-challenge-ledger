@@ -3,7 +3,10 @@ import {
   type IntegrationEventProps,
 } from '../../../../shared/domain/events/integration-event.js';
 import type { MoneyProps } from '../value-objects/money.js';
-import type { WagerTransactionKind } from '../entities/wager-transaction.js';
+import type {
+  WagerFailureCode,
+  WagerTransactionKind,
+} from '../entities/wager-transaction.js';
 import type { LedgerDirection } from '../entities/wallet-ledger-entry.js';
 
 export interface WalletBalanceChangedData {
@@ -21,9 +24,23 @@ export interface WagerTransactionProcessedData {
   readonly transactionId: string;
   readonly walletId: string;
   readonly playerId: string;
+  readonly providerId?: string;
+  readonly externalTransactionId?: string;
   readonly kind: WagerTransactionKind;
   readonly money: Readonly<MoneyProps>;
   readonly balanceAfter: Readonly<MoneyProps>;
+}
+
+export interface WagerTransactionRejectedData {
+  readonly transactionId: string;
+  readonly walletId: string;
+  readonly playerId: string;
+  readonly providerId: string;
+  readonly externalTransactionId: string;
+  readonly kind: WagerTransactionKind;
+  readonly money: Readonly<MoneyProps>;
+  readonly balance: Readonly<MoneyProps>;
+  readonly failureCode: WagerFailureCode;
 }
 
 export class WalletBalanceChangedEvent extends IntegrationEvent<WalletBalanceChangedData> {
@@ -56,6 +73,24 @@ export class WagerTransactionProcessedEvent extends IntegrationEvent<WagerTransa
         ...props.data,
         money: freezeMoney(props.data.money),
         balanceAfter: freezeMoney(props.data.balanceAfter),
+      },
+    });
+  }
+}
+
+export class WagerTransactionRejectedEvent extends IntegrationEvent<WagerTransactionRejectedData> {
+  public readonly eventType = 'WagerTransactionRejected';
+  public readonly version = 1;
+
+  public constructor(
+    props: IntegrationEventProps<WagerTransactionRejectedData>,
+  ) {
+    super({
+      ...props,
+      data: {
+        ...props.data,
+        money: freezeMoney(props.data.money),
+        balance: freezeMoney(props.data.balance),
       },
     });
   }

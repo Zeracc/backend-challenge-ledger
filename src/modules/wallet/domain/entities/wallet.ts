@@ -1,6 +1,9 @@
 import {
+  InsufficientWalletFundsError,
+  InvalidWalletDebitError,
   InvalidWalletIdentityError,
   NegativeInitialBalanceError,
+  WalletCurrencyMismatchError,
 } from '../errors/wallet.errors.js';
 import type { Money } from '../value-objects/money.js';
 
@@ -77,6 +80,30 @@ export class Wallet {
 
   public get updatedAt(): Date {
     return new Date(this.updateDate.getTime());
+  }
+
+  public debit(money: Money, updatedAt: Date): Wallet {
+    if (this.currency !== money.currency) {
+      throw new WalletCurrencyMismatchError(this.currency, money.currency);
+    }
+
+    if (!money.isPositive()) {
+      throw new InvalidWalletDebitError();
+    }
+
+    if (this.currentBalance.isLessThan(money)) {
+      throw new InsufficientWalletFundsError();
+    }
+
+    return new Wallet(
+      this.id,
+      this.playerId,
+      this.currency,
+      this.currentBalance.subtract(money),
+      this.currentVersion + 1,
+      new Date(this.creationDate.getTime()),
+      new Date(updatedAt.getTime()),
+    );
   }
 
   private static assertIdentity(value: string, field: 'id' | 'playerId'): void {

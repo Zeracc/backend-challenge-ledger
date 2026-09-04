@@ -8,8 +8,8 @@ técnico de backend da Jungle Gaming.
 
 ## Estado atual
 
-O repositório contém, neste momento, a fundação do projeto e o primeiro objeto
-de valor do domínio:
+O repositório contém uma fatia vertical de abertura de Wallet e processamento
+concorrente de apostas:
 
 - Bun 1.x como runtime, gerenciador de pacotes e executor de testes;
 - NestJS com TypeScript em modo estrito;
@@ -20,11 +20,17 @@ de valor do domínio:
 - abertura de Wallet com `OPENING`, ledger e outbox atômicos;
 - migration reversível com constraints financeiras no PostgreSQL;
 - endpoint `POST /wallets` com respostas `201`, `400` e `409`;
+- processamento de `BET` com lock por Wallet no PostgreSQL;
+- idempotência persistente por chave e hash canônico SHA-256;
+- rejeição auditável por saldo insuficiente, sem lançamento no ledger;
+- endpoint `POST /wagering/transactions` com replay e conflitos distintos;
+- testes de 50 duplicatas concorrentes em três processos Bun;
 - documentos de arquitetura e rastreabilidade dos critérios de aceite.
 
-O processamento das transações de aposta ainda não foi implementado. Cada
-capacidade somente será marcada como concluída após a comprovação de suas
-garantias por testes unitários, de integração e de concorrência.
+`WIN`, `LOSS`, `REFUND`, `ROLLBACK`, SQS e o publisher da outbox ainda não foram
+implementados. Cada capacidade somente será marcada como concluída após a
+comprovação de suas garantias por testes unitários, de integração e de
+concorrência.
 
 ## Pré-requisitos
 
@@ -77,6 +83,25 @@ Content-Type: application/json
 {
   "playerId": "0192f28f-5dc0-7d58-bdb2-814ad6a0f4a1",
   "initialBalance": { "amount": "1000.00", "currency": "BRL" }
+}
+```
+
+### Processar uma aposta
+
+```http
+POST /wagering/transactions
+Idempotency-Key: provider-a:transaction-123
+Content-Type: application/json
+
+{
+  "providerId": "provider-a",
+  "externalTransactionId": "transaction-123",
+  "playerId": "0192f28f-5dc0-7d58-bdb2-814ad6a0f4a1",
+  "walletId": "0192f291-27dd-7d3f-8071-5f8685deef37",
+  "roundId": "round-987",
+  "gameId": "fortune-chimp",
+  "kind": "BET",
+  "money": { "amount": "25.00", "currency": "BRL" }
 }
 ```
 

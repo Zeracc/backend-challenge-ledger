@@ -94,12 +94,36 @@ identidade entre wallet, transação e ledger, aritmética do lançamento e um �
 lançamento por wallet e transação. Trigger no PostgreSQL rejeita `UPDATE` e
 `DELETE` no ledger.
 
+## Processamento de BET
+
+`POST /wagering/transactions` processa `BET` de forma síncrona. O caso de uso
+normaliza `Money`, calcula SHA-256 sobre um JSON canônico com chaves ordenadas e
+cria a transação pendente. O header `Idempotency-Key` não entra no hash: ele é a
+identidade do comando, enquanto o hash representa somente seu payload de negócio.
+
+O adaptador inicia uma transação SQL e procura um resultado idempotente já
+confirmado. Para um comando novo, adquire `SELECT FOR UPDATE` apenas na linha da
+wallet, verifica novamente a idempotência e aplica a regra de domínio. Esse lock
+serializa movimentações da mesma wallet entre processos, sem bloquear wallets
+diferentes.
+
+Uma aposta aceita atualiza saldo e versão, persiste `WagerTransaction`, inclui um
+`DEBIT` no ledger e grava `WagerTransactionProcessed` e `WalletBalanceChanged` na
+outbox. Saldo insuficiente persiste a transação `REJECTED` com
+`INSUFFICIENT_FUNDS` e `WagerTransactionRejected`, sem alterar wallet ou ledger.
+Qualquer falha reverte todo o conjunto.
+
+O resultado terminal armazena o saldo observado no processamento. Assim, um
+replay devolve a resposta histórica mesmo que movimentações posteriores alterem
+a wallet. Índices únicos protegem `Idempotency-Key` e a identidade externa
+`(providerId, externalTransactionId)`.
+
 ## Idempotência
 
 O header `Idempotency-Key` representa a identidade de um comando HTTP. Para o
 SQS, será acrescentada a identidade persistente de inbox
-`(consumerName, messageId)`. O subconjunto canônico dos campos de negócio será
-transformado em hash e persistido:
+`(consumerName, messageId)`. No fluxo HTTP implementado, o subconjunto canônico
+dos campos de negócio é transformado em hash e persistido:
 
 - mesma identidade e mesmo hash: devolver o resultado originalmente persistido;
 - mesma identidade e hash diferente: devolver conflito estável de idempotência;

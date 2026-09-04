@@ -211,7 +211,7 @@ describe('Wallet opening with PostgreSQL', () => {
     });
     const error = await captureRejection(
       connection().execute(
-        `insert into "${schemaName}"."wager_transactions" ("id", "wallet_id", "player_id", "kind", "status", "amount", "currency", "created_at", "processed_at") values (?, ?, ?, 'OPENING', 'PROCESSED', '1.00', 'USD', now(), now())`,
+        `insert into "${schemaName}"."wager_transactions" ("id", "wallet_id", "player_id", "kind", "status", "amount", "currency", "result_balance", "result_currency", "created_at", "processed_at") values (?, ?, ?, 'OPENING', 'PROCESSED', '1.00', 'USD', '1.00', 'USD', now(), now())`,
         [randomUUID(), result.id, result.playerId],
       ),
     );
@@ -228,7 +228,7 @@ describe('Wallet opening with PostgreSQL', () => {
     const transactionId = randomUUID();
 
     await connection().execute(
-      `insert into "${schemaName}"."wager_transactions" ("id", "wallet_id", "player_id", "kind", "status", "amount", "currency", "created_at", "processed_at") values (?, ?, ?, 'OPENING', 'PROCESSED', '10.00', 'BRL', now(), now())`,
+      `insert into "${schemaName}"."wager_transactions" ("id", "wallet_id", "player_id", "kind", "status", "amount", "currency", "result_balance", "result_currency", "created_at", "processed_at") values (?, ?, ?, 'OPENING', 'PROCESSED', '10.00', 'BRL', '10.00', 'BRL', now(), now())`,
       [transactionId, result.id, result.playerId],
     );
     const error = await captureRejection(

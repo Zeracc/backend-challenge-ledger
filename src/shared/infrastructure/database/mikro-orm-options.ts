@@ -10,6 +10,7 @@ import { loadPostgreSqlSettings } from './postgresql-settings.js';
 
 export const mikroOrmOptions = defineConfig({
   ...loadPostgreSqlSettings(),
+  forceUndefined: true,
   entities: [
     WalletRecord,
     WagerTransactionRecord,
