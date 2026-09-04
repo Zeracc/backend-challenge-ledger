@@ -11,6 +11,8 @@
   },
   "scripts": {
     "build": "nest build",
+    "db:migrate": "mikro-orm migration:up",
+    "db:migrate:down": "mikro-orm migration:down",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "lint": "eslint src test --max-warnings=0",
@@ -26,6 +28,7 @@
   },
   "dependencies": {
     "@mikro-orm/core": "7.1.15",
+    "@mikro-orm/decorators": "7.1.15",
     "@mikro-orm/migrations": "7.1.15",
     "@mikro-orm/nestjs": "7.1.0",
     "@mikro-orm/postgresql": "7.1.15",

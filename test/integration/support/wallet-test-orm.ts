@@ -1,0 +1,45 @@
+import { Migrator } from '@mikro-orm/migrations';
+import { MikroORM } from '@mikro-orm/postgresql';
+import { ReflectMetadataProvider } from '@mikro-orm/decorators/legacy';
+
+import { OutboxMessageRecord } from '../../../src/modules/wallet/infrastructure/persistence/mikro-orm/entities/outbox-message.record.js';
+import { WagerTransactionRecord } from '../../../src/modules/wallet/infrastructure/persistence/mikro-orm/entities/wager-transaction.record.js';
+import { WalletLedgerEntryRecord } from '../../../src/modules/wallet/infrastructure/persistence/mikro-orm/entities/wallet-ledger-entry.record.js';
+import { WalletRecord } from '../../../src/modules/wallet/infrastructure/persistence/mikro-orm/entities/wallet.record.js';
+import { Migration20260904150000 } from '../../../src/shared/infrastructure/database/migrations/Migration20260904150000.js';
+import { loadPostgreSqlSettings } from '../../../src/shared/infrastructure/database/postgresql-settings.js';
+
+const entities = [
+  WalletRecord,
+  WagerTransactionRecord,
+  WalletLedgerEntryRecord,
+  OutboxMessageRecord,
+];
+
+export async function createWalletTestOrm(
+  schema: string,
+  migrate: boolean,
+): Promise<MikroORM> {
+  const orm = await MikroORM.init({
+    ...loadPostgreSqlSettings(),
+    entities,
+    extensions: [Migrator],
+    metadataProvider: ReflectMetadataProvider,
+    migrations: {
+      allOrNothing: true,
+      migrationsList: [Migration20260904150000],
+      schema,
+      transactional: true,
+    },
+    schema,
+  });
+
+  if (migrate) {
+    await orm.em
+      .getConnection()
+      .execute(`create schema if not exists "${schema}"`);
+    await orm.migrator.up({ schema });
+  }
+
+  return orm;
+}
