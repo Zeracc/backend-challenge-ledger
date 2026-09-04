@@ -7,6 +7,7 @@ import { WagerTransactionRecord } from '../../../src/modules/wallet/infrastructu
 import { WalletLedgerEntryRecord } from '../../../src/modules/wallet/infrastructure/persistence/mikro-orm/entities/wallet-ledger-entry.record.js';
 import { WalletRecord } from '../../../src/modules/wallet/infrastructure/persistence/mikro-orm/entities/wallet.record.js';
 import { Migration20260904150000 } from '../../../src/shared/infrastructure/database/migrations/Migration20260904150000.js';
+import { Migration20260905120000 } from '../../../src/shared/infrastructure/database/migrations/Migration20260905120000.js';
 import { loadPostgreSqlSettings } from '../../../src/shared/infrastructure/database/postgresql-settings.js';
 
 const entities = [
@@ -24,10 +25,11 @@ export async function createWalletTestOrm(
     ...loadPostgreSqlSettings(),
     entities,
     extensions: [Migrator],
+    forceUndefined: true,
     metadataProvider: ReflectMetadataProvider,
     migrations: {
       allOrNothing: true,
-      migrationsList: [Migration20260904150000],
+      migrationsList: [Migration20260904150000, Migration20260905120000],
       schema,
       transactional: true,
     },

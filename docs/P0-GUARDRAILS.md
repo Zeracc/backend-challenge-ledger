@@ -36,18 +36,22 @@ P0 conhecido.
 - **P0-1:** `money.spec.ts` cobre formato, precisão, operações, imutabilidade e
   conflito de moeda; `money-postgresql.integration.spec.ts` comprova round trips
   exatos em `NUMERIC(20, 2)` contra PostgreSQL real, incluindo o limite máximo.
-- **P0-2 (parcial):** o schema rejeita saldo negativo; a disputa concorrente por
-  saldo insuficiente permanece pendente até a implementação de `BET`.
-- **P0-3 (parcial):** o schema limita o ledger a uma entrada por wallet e
-  transação; duplicatas concorrentes de apostas permanecem pendentes.
-- **P0-5 (parcial):** a unicidade de abertura foi comprovada por 12 chamadas em
-  três conexões PostgreSQL independentes; a prova em três processos permanece
-  pendente para o processamento de apostas.
-- **P0-6 (parcial):** os eventos de abertura são incluídos na outbox dentro da
-  transação financeira; publicação, leases e recuperação após queda permanecem
-  pendentes.
-- **P0-7 (parcial):** a abertura grava wallet, `OPENING` e ledger atomicamente;
-  constraints validam a aritmética e um trigger rejeita atualização e exclusão.
-  Os demais cenários financeiros ainda precisam da mesma prova de reconciliação.
+- **P0-2:** duas apostas concorrentes de `80.00 BRL` contra saldo `100.00 BRL`
+  produzem uma `PROCESSED`, uma `REJECTED`, saldo `20.00 BRL` e um único débito.
+- **P0-3 (parcial):** 50 cópias concorrentes da mesma BET, distribuídas em três
+  processos, produzem uma transação e um débito. Redelivery pelo SQS permanece
+  pendente.
+- **P0-4 (parcial):** chave, hash e resposta histórica são persistidos; conflito
+  de payload e replay após o encerramento do processo original são comprovados.
+  A identidade de inbox do SQS permanece pendente.
+- **P0-5 (parcial):** três processos Bun disputam a mesma BET usando somente o
+  PostgreSQL como coordenação. Workers de inbox e outbox ainda serão validados no
+  mesmo modelo multiprocesso.
+- **P0-6 (parcial):** eventos de abertura, BET processada e BET rejeitada são
+  incluídos na outbox dentro da transação financeira; publicação, leases e
+  recuperação após queda permanecem pendentes.
+- **P0-7 (parcial):** abertura e BET gravam wallet, transação, ledger e outbox
+  atomicamente; falha na outbox reverte o débito. Todos os cenários implementados
+  terminam reconciliados, mas as demais operações ainda estão pendentes.
 - **P0-8 (parcial):** migrations, constraints, atomicidade e concorrência desta
   fase são testadas em PostgreSQL real. A comprovação com SQS permanece pendente.
