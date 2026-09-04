@@ -3,8 +3,8 @@
 Processador distribuído de transações de apostas desenvolvido para o desafio
 técnico de backend da Jungle Gaming.
 
-> A solução está em desenvolvimento. O enunciado original do desafio foi
-> preservado integralmente em [`docs/CHALLENGE.md`](docs/CHALLENGE.md).
+> A solução está em desenvolvimento. A documentação complementar e o enunciado
+> preservado serão incluídos na entrega final.
 
 ## Estado atual
 
@@ -134,9 +134,9 @@ são removidos ao final da execução.
 
 - [`ARCHITECTURE.md`](ARCHITECTURE.md): fronteiras, estratégia de consistência e
   trade-offs.
-- [`docs/ACCEPTANCE-CRITERIA.md`](docs/ACCEPTANCE-CRITERIA.md): rastreabilidade
-  entre requisitos, implementação e evidências.
-- [`docs/CHALLENGE.md`](docs/CHALLENGE.md): enunciado original da Jungle Gaming.
+
+A rastreabilidade completa dos critérios de aceite e o enunciado preservado
+serão adicionados na entrega final.
 
 ## Fluxo de entrega
 
