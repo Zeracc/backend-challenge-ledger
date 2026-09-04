@@ -8,12 +8,15 @@ técnico de backend da Jungle Gaming.
 
 ## Estado atual
 
-O repositório contém, neste momento, a fundação do projeto:
+O repositório contém, neste momento, a fundação do projeto e o primeiro objeto
+de valor do domínio:
 
 - Bun 1.x como runtime, gerenciador de pacotes e executor de testes;
 - NestJS com TypeScript em modo estrito;
 - endpoint mínimo de liveness;
 - infraestrutura local com PostgreSQL e LocalStack por Docker Compose;
+- `Money` imutável, multi-moeda e sem aritmética de ponto flutuante;
+- teste de round trip monetário contra PostgreSQL real;
 - documentos de arquitetura e rastreabilidade dos critérios de aceite.
 
 O processamento financeiro ainda não foi implementado. Cada capacidade somente
@@ -61,6 +64,7 @@ bun run format:check
 bun run lint
 bun run typecheck
 bun test
+bun run test:integration
 bun run build
 docker compose config --quiet
 ```

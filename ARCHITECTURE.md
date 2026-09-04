@@ -47,7 +47,8 @@ Os valores monetários nos contratos da aplicação e dos transportes serão str
 decimais com escala fixa. A aritmética de domínio utilizará `decimal.js`; o tipo
 `number` do JavaScript é proibido para valores monetários. O PostgreSQL armazenará
 os valores em colunas exatas `NUMERIC(..., 2)`, acompanhadas das constraints
-adequadas. O mapeamento do ORM deverá converter os valores por meio de strings,
+adequadas. A precisão inicial será `NUMERIC(20, 2)`, permitindo até 18 dígitos
+inteiros. O mapeamento do ORM deverá converter os valores por meio de strings,
 nunca por um valor de ponto flutuante.
 
 ## Estratégia de transação e concorrência

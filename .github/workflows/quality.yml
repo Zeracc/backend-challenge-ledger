@@ -11,6 +11,26 @@ permissions:
 jobs:
   quality:
     runs-on: ubuntu-latest
+    env:
+      POSTGRES_DB: wagering
+      POSTGRES_HOST: 127.0.0.1
+      POSTGRES_PASSWORD: wagering
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: wagering
+    services:
+      postgres:
+        image: postgres:17.11-alpine
+        env:
+          POSTGRES_DB: wagering
+          POSTGRES_PASSWORD: wagering
+          POSTGRES_USER: wagering
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U wagering -d wagering"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 15
     steps:
       - name: Check out repository
         uses: actions/checkout@v4

@@ -30,3 +30,9 @@ Antes de integrar uma fase de desenvolvimento:
 
 Funcionalidades opcionais não poderão ser iniciadas enquanto existir um defeito
 P0 conhecido.
+
+## Evidências implementadas
+
+- **P0-1:** `money.spec.ts` cobre formato, precisão, operações, imutabilidade e
+  conflito de moeda; `money-postgresql.integration.spec.ts` comprova round trips
+  exatos em `NUMERIC(20, 2)` contra PostgreSQL real, incluindo o limite máximo.
