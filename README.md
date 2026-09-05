@@ -338,6 +338,12 @@ mesmo comando com os mesmos IDs/chave, considerando que ele poderá ser aplicado
 
 ## Segurança e logs
 
+A autenticação real foi deliberadamente deixada fora do escopo, conforme a seção
+2 do desafio. Existe um `NoOpAuthGuard` que permite a requisição; não há validação
+de token nem autorização por proprietário. A decisão, os arquivos envolvidos e
+o desenho futuro com IdP externo estão em
+[`ARCHITECTURE.md` — Decisão sobre autenticação](ARCHITECTURE.md#decisão-sobre-autenticação).
+
 O Compose publica as portas somente em `127.0.0.1`; as credenciais padrão são
 exclusivas do ambiente local. A imagem da API executa como usuário `bun`.
 Não exponha a API diretamente à Internet: o guard não autentica nem autoriza

@@ -368,6 +368,39 @@ endpoints de negócio usam inicialmente um `NoOpAuthGuard`, deixando explícito 
 ponto de substituição. Em produção, esse guard delegaria a validação a um provedor
 OIDC externo, como Keycloak ou Zitadel.
 
+Essa escolha atende à seção 2 do enunciado: não implementar autenticação é
+aceito quando a decisão, o desenho futuro e o ponto de extensão estão explícitos.
+Priorizamos correção financeira, concorrência, idempotência e recuperação,
+que são avaliadas e contêm os critérios eliminatórios. Não há implementação de
+JWT, login, cadastro de usuários ou validação de senhas neste projeto.
+
+O ponto concreto é `src/shared/presentation/http/no-op-auth.guard.ts`:
+`canActivate()` retorna `true`. `WalletModule` registra o guard; os controllers
+de wallet, transações e consultas aplicam `@UseGuards(NoOpAuthGuard)`.
+Isso organiza a substituição futura, mas **não comprova a identidade de quem
+chama**. Validar que wallet/player/provider são coerentes é regra de domínio;
+não equivale a autorizar o chamador a acessar esses recursos.
+
+O desenho que adotaríamos, ainda não implementado, é:
+
+1. Integrar Keycloak/Zitadel como IdP externo usando OIDC/OAuth 2.0. O IdP
+   gerencia usuários, clientes e credenciais; a aplicação não cria tabela de senhas.
+2. Substituir o guard por validação de access token: assinatura com chaves JWKS
+   do emissor confiável, algoritmo permitido, issuer, audience e validade temporal.
+   Decodificar um JWT sem validar esses requisitos não autentica ninguém.
+3. Construir a identidade autenticada a partir de claims validadas e aplicar
+   autorização por escopos e vínculo com provider/player/wallet em comandos e
+   consultas. Não confiar no `providerId` do corpo como prova de identidade.
+4. Cobrir token ausente/inválido/expirado com 401 e identidade sem permissão com
+   403, incluindo tentativa de consultar wallet alheia e todas as páginas do ledger.
+   As invariantes financeiras continuam nos mesmos casos de uso e no PostgreSQL.
+5. Configurar segredos, TLS, acesso de rede e permissões de filas para o ambiente
+   real. Tokens, Authorization e claims pessoais não entram nos logs.
+
+Na apresentação, a ausência de autenticação deve ser descrita como decisão de
+escopo permitida pelo desafio, não como autenticação concluída. O Compose limita
+as portas a localhost; a configuração atual não deve ser exposta publicamente.
+
 Os endpoints de health permanecem públicos. O SQS é tratado como canal
 interno confiável, mas a identidade do provedor contida em cada mensagem continua
 sujeita às validações de domínio.
