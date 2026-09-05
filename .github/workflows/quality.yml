@@ -17,7 +17,22 @@ jobs:
       POSTGRES_PASSWORD: wagering
       POSTGRES_PORT: 5432
       POSTGRES_USER: wagering
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      AWS_REGION: us-east-1
+      SQS_ENDPOINT: http://127.0.0.1:4566
     services:
+      localstack:
+        image: localstack/localstack:4.8.1
+        env:
+          SERVICES: sqs
+        ports:
+          - 4566:4566
+        options: >-
+          --health-cmd "awslocal sqs list-queues"
+          --health-interval 3s
+          --health-timeout 5s
+          --health-retries 20
       postgres:
         image: postgres:17.11-alpine
         env:

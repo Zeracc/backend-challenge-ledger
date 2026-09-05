@@ -18,6 +18,10 @@ import { MikroOrmWalletOpeningRepository } from './infrastructure/persistence/mi
 import { PendingReferenceScheduler } from './infrastructure/scheduling/pending-reference.scheduler.js';
 import { WalletController } from './presentation/http/wallet.controller.js';
 import { WageringController } from './presentation/http/wagering.controller.js';
+import { WalletQueriesController } from './presentation/http/wallet-queries.controller.js';
+import { QueryWalletUseCase } from './application/use-cases/query-wallet.js';
+import { MikroOrmWalletReadRepository } from './infrastructure/persistence/mikro-orm/wallet-read.repository.js';
+import { ReconciliationTelemetry } from './infrastructure/observability/reconciliation.telemetry.js';
 
 const openWalletProvider: Provider = {
   provide: OpenWalletUseCase,
@@ -63,13 +67,23 @@ const reprocessPendingReferencesProvider: Provider = {
       OutboxMessageRecord,
     ]),
   ],
-  controllers: [WalletController, WageringController],
+  controllers: [WalletController, WageringController, WalletQueriesController],
   providers: [
     openWalletProvider,
     processWagerTransactionProvider,
     reprocessPendingReferencesProvider,
     PendingReferenceScheduler,
     NoOpAuthGuard,
+    ReconciliationTelemetry,
+    {
+      provide: QueryWalletUseCase,
+      inject: [EntityManager, ReconciliationTelemetry],
+      useFactory: (
+        em: EntityManager,
+        telemetry: ReconciliationTelemetry,
+      ): QueryWalletUseCase =>
+        new QueryWalletUseCase(new MikroOrmWalletReadRepository(em), telemetry),
+    },
   ],
 })
 export class WalletModule {}

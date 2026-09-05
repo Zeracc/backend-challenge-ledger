@@ -95,7 +95,10 @@ export class MikroOrmWagerTransactionProcessor
         status: WagerTransactionStatus.PendingReference,
         nextReferenceAttemptAt: { $lte: command.occurredAt },
       },
-      { limit: command.batchSize },
+      {
+        limit: command.batchSize,
+        orderBy: { nextReferenceAttemptAt: 'asc', id: 'asc' },
+      },
     );
     const result: ReprocessPendingReferencesResult = {
       scanned: candidates.length,
@@ -104,23 +107,36 @@ export class MikroOrmWagerTransactionProcessor
       rescheduled: 0,
     };
 
+    const errors: unknown[] = [];
     for (const candidate of candidates) {
-      const outcome = await this.entityManager.transactional(
-        (transactionManager) =>
-          this.reprocessPendingReferenceWithinTransaction(
-            transactionManager,
-            candidate.id,
-            command,
-          ),
-      );
+      try {
+        const outcome = await this.entityManager
+          .fork()
+          .transactional((transactionManager) =>
+            this.reprocessPendingReferenceWithinTransaction(
+              transactionManager,
+              candidate.id,
+              command,
+            ),
+          );
 
-      if (outcome === 'PROCESSED') {
-        result.processed += 1;
-      } else if (outcome === 'REJECTED') {
-        result.rejected += 1;
-      } else if (outcome === 'RESCHEDULED') {
-        result.rescheduled += 1;
+        if (outcome === 'PROCESSED') {
+          result.processed += 1;
+        } else if (outcome === 'REJECTED') {
+          result.rejected += 1;
+        } else if (outcome === 'RESCHEDULED') {
+          result.rescheduled += 1;
+        }
+      } catch (error: unknown) {
+        errors.push(error);
       }
+    }
+
+    if (errors.length > 0) {
+      throw new AggregateError(
+        errors,
+        'Falha ao reprocessar referências; os demais itens do lote foram tentados.',
+      );
     }
 
     return result;
@@ -246,8 +262,8 @@ export class MikroOrmWagerTransactionProcessor
           record,
         );
         return 'PROCESSED';
-      case WagerTransactionKind.Rollback:
-        await this.processRollback(
+      case WagerTransactionKind.Rollback: {
+        const result = await this.processRollback(
           entityManager,
           walletRecord,
           wallet,
@@ -256,7 +272,10 @@ export class MikroOrmWagerTransactionProcessor
           reference,
           record,
         );
-        return 'PROCESSED';
+        return result.status === WagerTransactionStatus.Rejected
+          ? 'REJECTED'
+          : 'PROCESSED';
+      }
       default:
         throw new Error(
           `A transação pendente ${transaction.kind} não suporta referência.`,

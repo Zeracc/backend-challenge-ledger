@@ -14,6 +14,7 @@ import type { WagerTransactionKind } from '../../../src/modules/wallet/domain/en
 import { MikroOrmWagerTransactionProcessor } from '../../../src/modules/wallet/infrastructure/persistence/mikro-orm/wager-transaction.processor.js';
 import { MikroOrmWalletOpeningRepository } from '../../../src/modules/wallet/infrastructure/persistence/mikro-orm/wallet-opening.repository.js';
 import type { IdGenerator } from '../../../src/shared/application/ports/id-generator.js';
+import type { Clock } from '../../../src/shared/application/ports/clock.js';
 import { Sha256PayloadHasher } from '../../../src/shared/infrastructure/serialization/sha256-payload-hasher.js';
 import { SystemClock } from '../../../src/shared/infrastructure/system/system-clock.js';
 import { UuidGenerator } from '../../../src/shared/infrastructure/system/uuid-generator.js';
@@ -104,11 +105,12 @@ export class WagerTestContext {
   public createUseCase(
     instance: MikroORM = this.getOrm(),
     idGenerator: IdGenerator = new UuidGenerator(),
+    clock: Clock = new SystemClock(),
   ): ProcessWagerTransactionUseCase {
     return new ProcessWagerTransactionUseCase(
       new MikroOrmWagerTransactionProcessor(instance.em.fork()),
       idGenerator,
-      new SystemClock(),
+      clock,
       new Sha256PayloadHasher(),
     );
   }

@@ -232,6 +232,50 @@ describe('reprocessamento de PENDING_REFERENCE com PostgreSQL', () => {
     await context.expectReconciled(wallet.id);
   });
 
+  it('conta ROLLBACK pendente rejeitado por saldo como rejeição', async () => {
+    const at = new Date('2026-09-08T14:30:00.000Z');
+    const playerId = randomUUID();
+    const wallet = await context.openWallet(playerId, '0.00');
+    const winId = randomUUID();
+    const pending = await processAt(at).execute(
+      context.wagerInput(
+        WagerTransactionKind.Rollback,
+        wallet.id,
+        playerId,
+        '10.00',
+        { referenceExternalTransactionId: winId },
+      ),
+    );
+    await processAt(at).execute(
+      context.wagerInput(
+        WagerTransactionKind.Win,
+        wallet.id,
+        playerId,
+        '10.00',
+        { externalTransactionId: winId },
+      ),
+    );
+    await processAt(at).execute(
+      context.wagerInput(
+        WagerTransactionKind.Bet,
+        wallet.id,
+        playerId,
+        '10.00',
+      ),
+    );
+    expect(await reprocessAt(at).execute()).toEqual({
+      scanned: 1,
+      processed: 0,
+      rejected: 1,
+      rescheduled: 0,
+    });
+    expect(await context.transactionState(pending.transactionId)).toMatchObject(
+      { status: 'REJECTED', failureCode: 'ROLLBACK_INSUFFICIENT_FUNDS' },
+    );
+    expect(await context.ledgerState(pending.transactionId)).toBeUndefined();
+    await context.expectReconciled(wallet.id);
+  });
+
   it('mantém a pendência quando a outbox falha durante o reprocessamento', async () => {
     const at = new Date('2026-09-08T15:00:00.000Z');
     const playerId = randomUUID();
@@ -257,6 +301,25 @@ describe('reprocessamento de PENDING_REFERENCE com PostgreSQL', () => {
       ),
     );
     const existingOutboxId = await context.findOpeningOutboxId(wallet.id);
+    const laterAt = new Date(at.getTime() + 1);
+    const secondPending = await processAt(laterAt).execute(
+      context.wagerInput(
+        WagerTransactionKind.Refund,
+        wallet.id,
+        playerId,
+        '25.00',
+        { referenceExternalTransactionId: 'second-bet-outbox-failure' },
+      ),
+    );
+    await processAt(laterAt).execute(
+      context.wagerInput(
+        WagerTransactionKind.Bet,
+        wallet.id,
+        playerId,
+        '25.00',
+        { externalTransactionId: 'second-bet-outbox-failure' },
+      ),
+    );
     const error = await captureRejection(
       new ReprocessPendingReferencesUseCase(
         new MikroOrmWagerTransactionProcessor(
@@ -266,14 +329,21 @@ describe('reprocessamento de PENDING_REFERENCE com PostgreSQL', () => {
             existingOutboxId,
             randomUUID(),
             randomUUID(),
+            randomUUID(),
+            randomUUID(),
+            randomUUID(),
+            randomUUID(),
           ]),
         ),
-        new FixedClock(at),
+        new FixedClock(laterAt),
         retryPolicy,
       ).execute(),
     );
 
     expect(error).toBeInstanceOf(Error);
+    expect(
+      await context.transactionState(secondPending.transactionId),
+    ).toMatchObject({ status: 'PROCESSED' });
     expect(await context.transactionState(pending.transactionId)).toMatchObject(
       {
         status: WagerTransactionStatus.PendingReference,
@@ -282,11 +352,11 @@ describe('reprocessamento de PENDING_REFERENCE com PostgreSQL', () => {
     );
     expect(await context.walletState(wallet.id)).toEqual({
       balance: '75.00',
-      version: 2,
+      version: 4,
     });
     expect(
       await context.countLedgerEntries(wallet.id, WagerTransactionKind.Refund),
-    ).toBe(0);
+    ).toBe(1);
     await context.expectReconciled(wallet.id);
   });
 });
