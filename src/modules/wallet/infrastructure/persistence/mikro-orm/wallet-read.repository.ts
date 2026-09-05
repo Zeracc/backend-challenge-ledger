@@ -120,9 +120,9 @@ export class MikroOrmWalletReadRepository extends WalletReadRepository {
         select id, wallet_id as "walletId", transaction_id as "transactionId", direction,
           amount::text, currency, balance_before::text as "balanceBefore",
           balance_after::text as "balanceAfter", created_at as "createdAt", sequence::text
-        from ${table}
+        from ${table} l
         where wallet_id = ? and sequence > ?::bigint and sequence <= ?::bigint
-        order by sequence asc limit ?`,
+        order by l.sequence asc limit ?`,
           [walletId, cursor?.after ?? '0', ceiling, limit + 1],
         );
         const page = rows.slice(0, limit);

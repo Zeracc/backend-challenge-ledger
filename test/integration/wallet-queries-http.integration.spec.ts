@@ -150,6 +150,43 @@ describe('consultas e reconciliação HTTP com PostgreSQL', () => {
     await context.expectReconciled(wallet.id);
   });
 
+  it('ordena sequências numericamente ao atravessar a quantidade de dígitos', async () => {
+    await context
+      .connection()
+      .execute(
+        "select setval(pg_get_serial_sequence(?, 'sequence'), 9998, false)",
+        [`${context.schemaName}.wallet_ledger_entries`],
+      );
+    const player = randomUUID();
+    const wallet = await context.openWallet(player, '100.00');
+    const useCase = context.createUseCase();
+    const bet = await useCase.execute(
+      context.wagerInput(WagerTransactionKind.Bet, wallet.id, player, '1.00'),
+    );
+    const win = await useCase.execute(
+      context.wagerInput(WagerTransactionKind.Win, wallet.id, player, '1.00'),
+    );
+    const first = await json<LedgerPage>(
+      `/wallets/${wallet.id}/ledger?limit=1`,
+    );
+    const second = await json<LedgerPage>(
+      `/wallets/${wallet.id}/ledger?limit=1&cursor=${first.nextCursor}`,
+    );
+    const third = await json<LedgerPage>(
+      `/wallets/${wallet.id}/ledger?limit=1&cursor=${second.nextCursor}`,
+    );
+    expect(first.items).toHaveLength(1);
+    expect(first.items[0]?.balanceBefore.amount).toBe('0.00');
+    expect(second.items.map((item) => item.transactionId)).toEqual([
+      bet.transactionId,
+    ]);
+    expect(third.items.map((item) => item.transactionId)).toEqual([
+      win.transactionId,
+    ]);
+    expect(third.nextCursor).toBeNull();
+    await context.expectReconciled(wallet.id);
+  });
+
   it('reconcilia wallet vazia e responde diferenças negativas sem corrigir dados', async () => {
     const empty = await context.openWallet(randomUUID(), '0.00');
     expect(await json<LedgerPage>(`/wallets/${empty.id}/ledger`)).toEqual({
