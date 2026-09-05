@@ -1,4 +1,8 @@
 import {
+  parseProcessWagerTransactionInput,
+  InvalidWagerRequestError,
+} from '../../application/parse-wager-input.js';
+import {
   BadRequestException,
   Body,
   ConflictException,
@@ -18,14 +22,9 @@ import { UseFilters } from '@nestjs/common';
 import { FinancialHttpExceptionFilter } from './financial-http-exception.filter.js';
 import {
   ProcessWagerTransactionUseCase,
-  type ProcessableWagerTransactionKind,
-  type ProcessWagerTransactionInput,
   type ProcessWagerTransactionOutput,
 } from '../../application/use-cases/process-wager-transaction.js';
-import {
-  WagerTransactionKind,
-  WagerTransactionStatus,
-} from '../../domain/entities/wager-transaction.js';
+import { WagerTransactionStatus } from '../../domain/entities/wager-transaction.js';
 import {
   InvalidCurrencyError,
   InvalidMoneyAmountError,
@@ -39,9 +38,6 @@ import {
   WalletNotFoundError,
   WalletPlayerMismatchError,
 } from '../../domain/errors/wallet.errors.js';
-
-const UUID_PATTERN =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 @Controller('wagering/transactions')
 @UseGuards(NoOpAuthGuard)
@@ -57,9 +53,8 @@ export class WageringController {
     @Headers('idempotency-key') idempotencyKey: string | undefined,
     @Body() body: unknown,
   ): Promise<ProcessWagerTransactionOutput> {
-    const input = parseProcessWagerTransactionInput(idempotencyKey, body);
-
     try {
+      const input = parseProcessWagerTransactionInput(idempotencyKey, body);
       const result = await this.processWagerTransaction.execute(input);
 
       if (result.status === WagerTransactionStatus.Rejected) {
@@ -96,6 +91,7 @@ export class WageringController {
       }
 
       if (
+        error instanceof InvalidWagerRequestError ||
         error instanceof InvalidCurrencyError ||
         error instanceof InvalidMoneyAmountError ||
         error instanceof MoneyAmountOutOfRangeError ||
@@ -110,95 +106,4 @@ export class WageringController {
       throw error;
     }
   }
-}
-
-function parseProcessWagerTransactionInput(
-  idempotencyKey: string | undefined,
-  body: unknown,
-): ProcessWagerTransactionInput {
-  if (!isObject(body) || !isObject(body.money)) {
-    throw invalidRequest();
-  }
-
-  const {
-    providerId,
-    externalTransactionId,
-    playerId,
-    walletId,
-    roundId,
-    gameId,
-    kind,
-    money,
-    referenceExternalTransactionId,
-  } = body;
-  const { amount, currency } = money;
-
-  if (
-    !isBoundedString(idempotencyKey, 200) ||
-    !isBoundedString(providerId, 100) ||
-    !isBoundedString(externalTransactionId, 150) ||
-    typeof playerId !== 'string' ||
-    !UUID_PATTERN.test(playerId) ||
-    typeof walletId !== 'string' ||
-    !UUID_PATTERN.test(walletId) ||
-    !isBoundedString(roundId, 150) ||
-    !isBoundedString(gameId, 150) ||
-    !isProcessableKind(kind) ||
-    (referenceExternalTransactionId !== undefined &&
-      !isBoundedString(referenceExternalTransactionId, 150)) ||
-    typeof amount !== 'string' ||
-    typeof currency !== 'string'
-  ) {
-    throw invalidRequest();
-  }
-
-  return {
-    idempotencyKey,
-    providerId,
-    externalTransactionId,
-    playerId,
-    walletId,
-    roundId,
-    gameId,
-    kind,
-    ...(referenceExternalTransactionId === undefined
-      ? {}
-      : { referenceExternalTransactionId }),
-    money: { amount, currency },
-  };
-}
-
-function isProcessableKind(
-  value: unknown,
-): value is ProcessableWagerTransactionKind {
-  return (
-    value === WagerTransactionKind.Bet ||
-    value === WagerTransactionKind.Win ||
-    value === WagerTransactionKind.Loss ||
-    value === WagerTransactionKind.Refund ||
-    value === WagerTransactionKind.Rollback
-  );
-}
-
-function isObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-function isBoundedString(
-  value: unknown,
-  maximumLength: number,
-): value is string {
-  return (
-    typeof value === 'string' &&
-    value.trim().length > 0 &&
-    value.length <= maximumLength
-  );
-}
-
-function invalidRequest(): BadRequestException {
-  return new BadRequestException({
-    code: 'INVALID_WAGER_REQUEST',
-    message:
-      'Informe Idempotency-Key e um payload BET, WIN, LOSS, REFUND ou ROLLBACK válido com identificadores, Money, UUIDs e referência quando exigida.',
-  });
 }

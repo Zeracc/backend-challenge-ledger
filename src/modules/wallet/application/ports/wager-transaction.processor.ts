@@ -4,8 +4,10 @@ import type {
   WagerTransactionStatus,
 } from '../../domain/entities/wager-transaction.js';
 import type { MoneyProps } from '../../domain/value-objects/money.js';
+import type { InboxIdentity } from '../../domain/entities/inbox-message.js';
 
 export interface ProcessWagerTransactionCommand {
+  inbox?: InboxIdentity;
   transaction: WagerTransaction;
   ledgerEntryId: string;
   processedEventId: string;

@@ -36,7 +36,8 @@ concorrente de apostas:
 - testes de 50 duplicatas concorrentes em três processos Bun;
 - documentos de arquitetura e rastreabilidade dos critérios de aceite.
 
-O consumidor SQS/Inbox/DLQ e o publisher da outbox ainda não foram implementados.
+O consumidor SQS usa Inbox atômica, retry limitado, DLQ e confirmação após commit.
+O publisher da outbox ainda não foi implementado.
 A observabilidade completa também permanece pendente. Cada capacidade somente será marcada como
 concluída após a comprovação de suas garantias por testes unitários, de integração
 e de concorrência.
@@ -170,6 +171,32 @@ Recursos ausentes retornam `404`, parâmetros inválidos `400` e falhas transit�
 reconhecidas do PostgreSQL `503` com `INFRASTRUCTURE_UNAVAILABLE`. Nos comandos,
 um reenvio deve preservar `Idempotency-Key`. As métricas de reconciliação estão
 em formato Prometheus, por processo; os demais indicadores operacionais são futuros.
+
+## Consumo SQS
+
+No Compose, o consumidor inicia junto com a API. Para execução local com Bun,
+configure `SQS_CONSUMER_ENABLED=true`. As filas são `wager-transactions.fifo` e
+`wager-transactions-dlq.fifo`; `SQS_QUEUE_URL` e `SQS_DLQ_URL` permitem substituir
+as URLs padrão do LocalStack.
+
+O corpo da mensagem contém `messageId`, `type: "WagerTransactionRequested"`,
+`occurredAt` em ISO UTC e `data`. O objeto `data` segue o corpo do comando HTTP,
+acrescido de `idempotencyKey`. `OPENING` não é aceito por esse canal.
+Preserve o `messageId` lógico no reenvio e forneça os atributos FIFO
+`MessageGroupId` e `MessageDeduplicationId` ao publicar.
+
+A Inbox identifica `(consumerName, messageId)` no PostgreSQL e participa da mesma
+transação de wallet, transação de aposta, ledger e outbox. Rejeições de negócio
+e referências pendentes persistidas são confirmadas. Erros de infraestrutura
+recebem backoff de 1 a 60 segundos, com limite de cinco entregas. Payload inválido,
+conflitos de identidade e tentativas esgotadas seguem à DLQ antes do ack da origem.
+Uma falha ao enviar à DLQ preserva a mensagem original para nova entrega.
+
+O consumidor renova a visibilidade durante o processamento e aguarda o trabalho
+ativo no shutdown. A suíte verifica 50 duplicatas em três processos, queda após
+commit antes do ack, rollback da Inbox e financeiro, heartbeat e drenagem.
+O transporte tem entrega pelo menos uma vez; a unicidade financeira é garantida
+pelo PostgreSQL. Reprocessamento operacional da DLQ e métricas gerais são pendentes.
 
 ## Documentação
 

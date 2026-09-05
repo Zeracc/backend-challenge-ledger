@@ -222,6 +222,14 @@ export class WagerTestContext {
     return rows[0]?.count ?? 0;
   }
 
+  public async countWalletOutbox(walletId: string): Promise<number> {
+    const rows = await this.connection().execute<Array<{ count: number }>>(
+      `select count(*)::int as "count" from "${this.schemaName}"."outbox_messages" where "payload"->'data'->>'walletId' = ?`,
+      [walletId],
+    );
+    return rows[0]?.count ?? 0;
+  }
+
   public async findOpeningOutboxId(walletId: string): Promise<string> {
     const rows = await this.connection().execute<Array<{ id: string }>>(
       `select "id" from "${this.schemaName}"."outbox_messages" where "payload"->'data'->>'walletId' = ? limit 1`,

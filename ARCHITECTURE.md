@@ -253,6 +253,42 @@ transações, retries, DLQ, locks, lag de outbox e latência permanecem futuras.
 Os endpoints financeiros reconhecem erros transitórios do PostgreSQL e retornam
 503 com código estável; erros inesperados continuam distintos como 500.
 
+## Consumidor SQS implementado
+
+HTTP e SQS compartilham a validação do comando e `ProcessWagerTransactionUseCase`.
+A identidade de transporte é o `messageId` lógico do envelope, separada do ID AWS
+e da chave de idempotência financeira. A Inbox usa chave composta por consumidor
+e mensagem, hash SHA-256 do comando canônico e FK para a transação resultante.
+O timestamp do envelope é validado, mas não substitui o relógio confiável do
+processamento nem integra o hash; reenviar o mesmo comando com outro timestamp
+não cria efeito financeiro.
+
+A primeira escrita da Inbox e sua conclusão ocorrem na mesma transação SQL do
+financeiro e da Outbox. Corridas na unicidade repetem a transação para ler o
+vencedor e concluir a Inbox do replay. O ack ocorre somente após o commit.
+`PENDING_REFERENCE` é confirmado porque seu retry já está persistido no banco;
+o scheduler existente assume a continuação.
+
+Uma rejeição de negócio persistida recebe ack. Mensagens inválidas, conflitos de
+payload/identidade, wallet ausente ou identidade incompatível seguem para DLQ.
+Erros não classificados recebem retry com backoff limitado; na quinta entrega,
+o consumidor envia à DLQ e somente então remove a origem. A DLQ mantém o corpo
+original e atributos `failureCode`/`originalMessageId`. Falhas técnicas revertidas
+não criam uma transação financeira `FAILED` artificial: o diagnóstico fica na
+DLQ, e uma política operacional de redrive permanece futura.
+
+O heartbeat renova a visibilidade e termina antes do ack ou mudança de destino.
+O shutdown aborta o long polling e aguarda o processamento ativo. O timeout HTTP
+de 25 segundos acomoda o long polling de 20 segundos. Locks têm timeout SQL de
+5 segundos e statements de 10 segundos no caminho SQS. Uma interrupção forçada
+deixa a mensagem reaparecer após o prazo de visibilidade; o teste com SIGKILL
+comprova replay sem novo débito após commit. O teste de drenagem exercita o hook
+do runner com processamento ativo, e o smoke Docker exercita SIGTERM em espera.
+
+Não há garantia de publicação exatamente uma vez na DLQ: o ID de deduplicação
+é estável, mas a janela FIFO é limitada. O publisher da Outbox, seus leases e
+seus testes de recuperação serão a próxima integração.
+
 ## Decisão sobre autenticação
 
 A autenticação não pontua no desafio e não deve deslocar as garantias P0. Os

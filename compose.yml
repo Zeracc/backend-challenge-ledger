@@ -67,6 +67,7 @@ services:
       POSTGRES_PORT: 5432
       POSTGRES_USER: ${POSTGRES_USER:-wagering}
       SQS_ENDPOINT: http://localstack:4566
+      SQS_CONSUMER_ENABLED: 'true'
     depends_on:
       localstack:
         condition: service_healthy

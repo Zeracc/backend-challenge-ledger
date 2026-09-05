@@ -12,6 +12,7 @@ import type {
   WagerTransactionProcessor,
 } from '../ports/wager-transaction.processor.js';
 import { PendingReferenceRetryPolicy } from '../pending-reference-retry-policy.js';
+import type { InboxIdentity } from '../../domain/entities/inbox-message.js';
 
 export type ProcessableWagerTransactionKind =
   | WagerTransactionKind.Bet
@@ -46,6 +47,7 @@ export class ProcessWagerTransactionUseCase {
 
   public async execute(
     input: ProcessWagerTransactionInput,
+    inbox?: InboxIdentity,
   ): Promise<ProcessWagerTransactionOutput> {
     const money = Money.from(input.money);
     const occurredAt = this.clock.now();
@@ -87,6 +89,7 @@ export class ProcessWagerTransactionUseCase {
     const transaction = createTransaction(input.kind, props);
 
     return this.processor.processAtomically({
+      ...(inbox === undefined ? {} : { inbox }),
       transaction,
       ledgerEntryId: this.idGenerator.generate(),
       processedEventId: this.idGenerator.generate(),
