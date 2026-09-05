@@ -14,7 +14,11 @@ export const sqsConsumerProvider: Provider = {
       region: process.env.AWS_REGION ?? 'us-east-1',
       endpoint,
       maxAttempts: 1,
-      requestHandler: { connectionTimeout: 1500, requestTimeout: 25000 },
+      requestHandler: {
+        connectionTimeout: 1500,
+        requestTimeout: 25000,
+        throwOnRequestTimeout: true,
+      },
     });
     return new SqsWagerConsumer(client, processWager, {
       queueUrl:

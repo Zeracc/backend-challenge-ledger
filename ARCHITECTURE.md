@@ -206,17 +206,17 @@ devem ser aplicados pelo guard em todas as páginas.
 
 ## Mensageria e outbox transacional
 
-Os eventos serão incluídos na outbox dentro da transação financeira e publicados
-somente depois do commit. Os publishers reservarão registros pendentes por meio
-de leases curtos no banco. Assim, chamadas de rede para o SQS não manterão uma
+Os eventos são incluídos na outbox dentro da transação financeira e publicados
+somente depois do commit. Os publishers reservam registros pendentes por meio
+de leases curtos no banco. Assim, chamadas de rede para o SQS não mantêm uma
 transação financeira aberta. Uma queda pode provocar publicação duplicada;
-portanto, os consumidores continuarão idempotentes.
+portanto, os consumidores devem deduplicar eventId persistentemente.
 
-O consumidor SQS confirmará a mensagem somente após o commit. Falhas de negócio
-serão terminais e confirmadas; falhas transitórias usarão retentativas com backoff
-exponencial limitado; falhas permanentes de transporte ou payload seguirão para
-a DLQ. Durante o desligamento gracioso, o processo concluirá o trabalho em
-andamento ou devolverá a visibilidade da mensagem.
+O consumidor SQS confirma a mensagem somente após o commit. Falhas de negócio
+são terminais e confirmadas; falhas transitórias usam retentativas com backoff
+exponencial limitado; falhas permanentes de transporte ou payload seguem para
+a DLQ. Durante o desligamento gracioso, o processo conclui o trabalho em
+andamento ou devolve a visibilidade da mensagem.
 
 ## Referências fora de ordem
 
@@ -286,8 +286,44 @@ comprova replay sem novo débito após commit. O teste de drenagem exercita o ho
 do runner com processamento ativo, e o smoke Docker exercita SIGTERM em espera.
 
 Não há garantia de publicação exatamente uma vez na DLQ: o ID de deduplicação
-é estável, mas a janela FIFO é limitada. O publisher da Outbox, seus leases e
-seus testes de recuperação serão a próxima integração.
+é estável, mas a janela FIFO é limitada. O publisher da Outbox segue a mesma
+semântica de entrega pelo menos uma vez descrita abaixo.
+
+## Publisher da Outbox implementado
+
+`OutboxMessage` encapsula o envelope, as datas, o estado terminal e o backoff.
+A porta `OutboxRepository` separa a reserva persistente do caso de uso;
+`IntegrationEventPublisher` separa o transporte. A implementação SQL usa uma CTE
+com `FOR UPDATE SKIP LOCKED` e `UPDATE RETURNING` em uma operação atômica curta.
+Somente eventos confirmados e devidos são candidatos. Nenhum lock de wallet ou
+transação financeira fica aberto durante a chamada de rede.
+
+Cada reserva recebe um UUID novo como token de posse. Confirmação e retry exigem
+esse token, evento ainda pendente e lease não expirado. As comparações de prazo
+e a persistência de horários usam o relógio do PostgreSQL. Assim, um processo
+atrasado não confirma nem reagenda o trabalho assumido por outro processo.
+A migration valida pares de campos do lease, protege o envelope contra UPDATE
+e impede transições de eventos já publicados.
+
+O lease de 30s excede o timeout de envio de 5s do SDK, configurado com
+`throwOnRequestTimeout=true`. Cada lote reserva até 20 eventos sequencialmente;
+falha de envio reagenda aquele evento e permite continuar os demais. Falha no
+banco após o envio deixa o lease recuperável por expiração. O shutdown impede
+novas reservas e aguarda o envio ativo, sem aguardar os demais itens do lote.
+
+Não há transação distribuída entre PostgreSQL e SQS. O intervalo entre envio e
+marcação pode produzir duplicatas com o mesmo eventId. O destino é
+`wager-events.fifo`, com aggregateId como grupo e eventId como chave FIFO, mas
+o consumidor deve persistir sua própria deduplicação. A ordem de chegada não
+representa necessariamente a ordem financeira; eventos WalletBalanceChanged
+incluem walletVersion para descartar snapshots antigos.
+
+Comprovações: transação financeira aberta não publica; commit torna eventos
+visíveis; três processos publicam 60 eventos; SIGKILL após reserva e após envio
+permite retomada; dono antigo não altera lease novo; falha de envio persiste
+retry; todos os quatro tipos chegam ao SQS; shutdown drena apenas o envio ativo.
+A política de retenção/arquivamento de eventos publicados permanece operacional
+e não exclui registros automaticamente nesta implementação.
 
 ## Decisão sobre autenticação
 

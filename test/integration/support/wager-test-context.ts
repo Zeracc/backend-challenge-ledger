@@ -2,7 +2,11 @@ import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
 import { expect } from 'bun:test';
-import type { MikroORM, PostgreSqlConnection } from '@mikro-orm/postgresql';
+import type {
+  EntityManager,
+  MikroORM,
+  PostgreSqlConnection,
+} from '@mikro-orm/postgresql';
 
 import {
   ProcessWagerTransactionUseCase,
@@ -91,9 +95,10 @@ export class WagerTestContext {
     playerId: string,
     amount: string,
     currency = 'BRL',
+    entityManager: EntityManager = this.getOrm().em.fork(),
   ): Promise<{ id: string }> {
     return new OpenWalletUseCase(
-      new MikroOrmWalletOpeningRepository(this.getOrm().em.fork()),
+      new MikroOrmWalletOpeningRepository(entityManager),
       new UuidGenerator(),
       new SystemClock(),
     ).execute({
