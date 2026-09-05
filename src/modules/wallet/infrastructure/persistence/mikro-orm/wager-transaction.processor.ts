@@ -34,6 +34,7 @@ import {
   WagerTransactionPendingReferenceEvent,
   WagerTransactionProcessedEvent,
   WagerTransactionRejectedEvent,
+  WagerTransactionFailedEvent,
   WalletBalanceChangedEvent,
 } from '../../../domain/events/wallet.events.js';
 import { Money } from '../../../domain/value-objects/money.js';
@@ -407,6 +408,32 @@ export class MikroOrmWagerTransactionProcessor
     }
 
     const wallet = walletRecord.toDomain();
+    if (command.terminalFailure) {
+      transaction.fail(wallet.balance);
+      const event = new WagerTransactionFailedEvent({
+        eventId: command.rejectedEventId,
+        aggregateId: transaction.id,
+        correlationId: transaction.id,
+        occurredAt: command.occurredAt,
+        data: {
+          transactionId: transaction.id,
+          walletId: wallet.id,
+          playerId: wallet.playerId,
+          providerId: external.providerId,
+          externalTransactionId: external.externalTransactionId,
+          kind: transaction.kind,
+          money: transaction.money.toJSON(),
+          balance: wallet.balance.toJSON(),
+          failureCode: WagerFailureCode.ProcessingAttemptsExhausted,
+        },
+      });
+      entityManager.persist([
+        new WagerTransactionRecord(transaction),
+        new OutboxMessageRecord(event),
+      ]);
+      await entityManager.flush();
+      return resultFromTransaction(transaction, false);
+    }
     const reference = await this.findReference(entityManager, transaction);
 
     if (

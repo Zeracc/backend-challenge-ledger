@@ -45,9 +45,24 @@ export class ProcessWagerTransactionUseCase {
     private readonly pendingReferenceRetryPolicy = new PendingReferenceRetryPolicy(),
   ) {}
 
-  public async execute(
+  public execute(
     input: ProcessWagerTransactionInput,
     inbox?: InboxIdentity,
+  ): Promise<ProcessWagerTransactionOutput> {
+    return this.process(input, inbox, false);
+  }
+
+  public failAfterRetries(
+    input: ProcessWagerTransactionInput,
+    inbox: InboxIdentity,
+  ): Promise<ProcessWagerTransactionOutput> {
+    return this.process(input, inbox, true);
+  }
+
+  private async process(
+    input: ProcessWagerTransactionInput,
+    inbox: InboxIdentity | undefined,
+    terminalFailure: boolean,
   ): Promise<ProcessWagerTransactionOutput> {
     const money = Money.from(input.money);
     const occurredAt = this.clock.now();
@@ -89,6 +104,7 @@ export class ProcessWagerTransactionUseCase {
     const transaction = createTransaction(input.kind, props);
 
     return this.processor.processAtomically({
+      ...(terminalFailure ? { terminalFailure: true } : {}),
       ...(inbox === undefined ? {} : { inbox }),
       transaction,
       ledgerEntryId: this.idGenerator.generate(),

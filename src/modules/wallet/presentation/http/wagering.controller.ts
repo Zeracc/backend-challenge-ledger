@@ -61,6 +61,10 @@ export class WageringController {
         throw new UnprocessableEntityException(result);
       }
 
+      if (result.status === WagerTransactionStatus.Failed) {
+        throw new HttpException(result, HttpStatus.FAILED_DEPENDENCY);
+      }
+
       if (result.status === WagerTransactionStatus.PendingReference) {
         throw new HttpException(result, HttpStatus.ACCEPTED);
       }

@@ -3,12 +3,12 @@
 Processador distribuído de transações de apostas desenvolvido para o desafio
 técnico de backend da Jungle Gaming.
 
-> A solução está em desenvolvimento. A documentação complementar e o enunciado
-> preservado serão incluídos na entrega final.
+Implementação do [desafio oficial da Jungle Gaming](https://github.com/junglegaming/backend-challenge).
+As decisões, garantias e limitações estão em [`ARCHITECTURE.md`](ARCHITECTURE.md).
 
 ## Estado atual
 
-O repositório contém uma fatia vertical de abertura de Wallet e processamento
+O repositório contém abertura de Wallet e processamento
 concorrente de apostas:
 
 - Bun 1.x como runtime, gerenciador de pacotes e executor de testes;
@@ -38,9 +38,8 @@ concorrente de apostas:
 
 O consumidor SQS usa Inbox atômica, retry limitado, DLQ e confirmação após commit.
 O publisher da Outbox usa leases no PostgreSQL, retry persistido e publicação SQS.
-As métricas operacionais obrigatórias são expostas em `/metrics`. Cada capacidade somente será marcada como
-concluída após a comprovação de suas garantias por testes unitários, de integração
-e de concorrência.
+As métricas operacionais obrigatórias são expostas em `/metrics`. As garantias
+são verificadas por testes unitários, de integração, concorrência e recuperação.
 
 ## Pré-requisitos
 
@@ -73,6 +72,10 @@ bun run db:migrate
 bun run start:dev
 ```
 
+Para ativar os workers ao executar com Bun, defina `SQS_CONSUMER_ENABLED=true`
+e `OUTBOX_PUBLISHER_ENABLED=true` no `.env`. No Compose, ambos já são ativados.
+O scheduler de referências pendentes é iniciado com a aplicação.
+
 O endpoint de liveness estará disponível em
 `GET http://localhost:3000/health/live`. `GET /health/ready` retorna `200` quando
 PostgreSQL e SQS respondem e `503` quando algum deles falha ou excede 1,5 segundo.
@@ -85,6 +88,15 @@ antes da inicialização:
 ```bash
 docker compose up --build api
 ```
+
+Para execução em segundo plano, use `docker compose up -d --build api`.
+API: `http://localhost:3000`; PostgreSQL: `localhost:55432`; LocalStack:
+`http://localhost:4566`. Pare com `docker compose stop`; os volumes preservam
+wallets, ledger e eventos. Não remova os volumes para reiniciar a aplicação.
+
+Moedas suportadas: **BRL, USD e EUR**, todas com escala fixa de duas casas.
+Outros códigos são rejeitados, inclusive códigos ISO válidos fora dessa política.
+O modelo continua multi-moeda e nunca converte valores entre moedas.
 
 ### Criar uma wallet
 
@@ -140,6 +152,12 @@ docker compose config --quiet
 
 Os testes de integração criam schemas isolados no PostgreSQL que
 são removidos ao final da execução.
+
+O CI executa a mesma suíte no Linux com PostgreSQL 17 e LocalStack reais.
+Para os cenários de fechamento: `bun test test/integration/final-delivery.integration.spec.ts`.
+Esse arquivo cobre falha terminal, corrida com processamento normal, política de
+moedas e scheduler reiniciado com três processos. Os demais testes comprovam
+50 duplicatas, hot wallet, Inbox/Outbox, falhas de commit/ack, leases e reconciliação.
 
 ## Consultas e reconciliação
 
@@ -269,12 +287,56 @@ não alteram resultados financeiros confirmados.
 - [`ARCHITECTURE.md`](ARCHITECTURE.md): fronteiras, estratégia de consistência e
   trade-offs.
 
-A rastreabilidade completa dos critérios de aceite e o enunciado preservado
-serão adicionados na entrega final.
+## Respostas e falhas terminais
+
+| Situação                                    | HTTP  |
+| ------------------------------------------- | ----- |
+| Wallet criada                               | `201` |
+| Transação processada ou replay processado   | `200` |
+| Referência aguardada de forma persistente   | `202` |
+| Entrada inválida ou moeda não suportada     | `400` |
+| Recurso ausente                             | `404` |
+| Identidade/payload conflitante              | `409` |
+| Rejeição de negócio                         | `422` |
+| Replay de falha técnica terminal `FAILED`   | `424` |
+| Infraestrutura temporariamente indisponível | `503` |
+| Erro inesperado sanitizado                  | `500` |
+
+Após esgotar as tentativas técnicas do SQS, o consumidor tenta persistir `FAILED`
+com `PROCESSING_ATTEMPTS_EXHAUSTED`, Inbox e `WagerTransactionFailed` na mesma
+transação. Não altera saldo nem ledger. Se outra execução já confirmou o comando,
+seu resultado prevalece. O evento de falha é adicional aos quatro eventos mínimos.
+O comando segue à DLQ antes do ack; replay de FAILED nunca aplica dinheiro.
+
+Se o banco também impedir a gravação terminal, o corpo original e o código ficam
+duravelmente na DLQ, com log `sqs_failed_audit_unavailable`. Nenhum status SQL é
+inventado. O redrive deve consultar primeiro a identidade da transação: resultados
+terminais são imutáveis. Se não houver registro, corrija a dependência e reenvie o
+mesmo comando com os mesmos IDs/chave, considerando que ele poderá ser aplicado.
+
+## Critérios e provas
+
+| Garantia                                                              | Evidência no repositório                                                                                                                                |
+| --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Precisão monetária e conflitos de moeda                               | `money.spec.ts`, `money-postgresql.integration.spec.ts`                                                                                                 |
+| Saldo não negativo, concorrência, 50 duplicatas em três processos     | `bet-processing-postgresql.integration.spec.ts`, `win-loss-processing-postgresql.integration.spec.ts`                                                   |
+| Reversões, referências fora de ordem e restart do scheduler           | `wager-reversals-postgresql.integration.spec.ts`, `pending-reference-reprocessing-postgresql.integration.spec.ts`, `final-delivery.integration.spec.ts` |
+| Inbox, redelivery, queda entre commit/ack, retry/DLQ                  | `sqs-inbox.integration.spec.ts`                                                                                                                         |
+| Outbox sem envio pré-commit, publishers concorrentes e crash recovery | `outbox-publishing.integration.spec.ts`                                                                                                                 |
+| Consultas, paginação e reconciliação                                  | `wallet-queries-http.integration.spec.ts`                                                                                                               |
+| Métricas, logs sanitizados e falhas de coleta                         | `operational-observability.integration.spec.ts`                                                                                                         |
+| Liveness e dependências reais                                         | `readiness-http.integration.spec.ts`                                                                                                                    |
+
+## Limites deliberados
+
+- Autenticação usa `NoOpAuthGuard`, opção aceita no desafio; não é controle de acesso de produção.
+- Entrega de eventos é pelo menos uma vez; consumidores deduplicam `eventId` no próprio banco.
+- Não há redrive automático de DLQ, arquivamento da Outbox ou reparo automático de saldo.
+- Não há dashboard/OpenTelemetry ou benchmark de carga; esses itens são opcionais.
+- Readiness mede alcance das dependências, não verifica permissões de todas as operações nem todas as filas.
+- Contadores são best effort por processo; reconciliação e ledger são a fonte auditável.
 
 ## Fluxo de entrega
 
-O desenvolvimento é dividido em branches locais de curta duração. Cada branch é
-integrada somente depois que suas verificações passam e, em seguida, é excluída.
-A entrega remota final manterá apenas a branch `main`, com um histórico linear e
-conciso.
+`main` é a referência de entrega. As features são revisadas por PR e integradas
+após aprovação do CI; o histórico preserva as decisões e as validações por etapa.

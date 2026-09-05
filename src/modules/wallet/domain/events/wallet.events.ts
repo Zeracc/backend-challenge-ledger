@@ -130,6 +130,23 @@ export class WagerTransactionPendingReferenceEvent extends IntegrationEvent<Wage
   }
 }
 
+export class WagerTransactionFailedEvent extends IntegrationEvent<WagerTransactionRejectedData> {
+  public readonly eventType = 'WagerTransactionFailed';
+  public readonly version = 1;
+  public constructor(
+    props: IntegrationEventProps<WagerTransactionRejectedData>,
+  ) {
+    super({
+      ...props,
+      data: {
+        ...props.data,
+        money: freezeMoney(props.data.money),
+        balance: freezeMoney(props.data.balance),
+      },
+    });
+  }
+}
+
 function freezeMoney(money: Readonly<MoneyProps>): Readonly<MoneyProps> {
   return Object.freeze({ ...money });
 }

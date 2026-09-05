@@ -9,6 +9,12 @@ import {
 import { Money } from './money.js';
 
 describe('Money', () => {
+  it('restringe moedas à política BRL, USD e EUR', () => {
+    for (const currency of ['BRL', 'USD', 'EUR'])
+      expect(Money.zero(currency).currency).toBe(currency);
+    for (const currency of ['XYZ', 'AAA', 'JPY'])
+      expect(() => Money.zero(currency)).toThrow();
+  });
   it('cria e serializa um valor monetário canônico', () => {
     const money = Money.from({ amount: '25.00', currency: 'BRL' });
 

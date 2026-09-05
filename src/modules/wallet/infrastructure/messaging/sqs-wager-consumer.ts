@@ -21,6 +21,8 @@ import type {
 } from '../../application/use-cases/process-wager-transaction.js';
 import { Sha256PayloadHasher } from '../../../../shared/infrastructure/serialization/sha256-payload-hasher.js';
 import { InboxPayloadConflictError } from '../../domain/entities/inbox-message.js';
+import type { InboxIdentity } from '../../domain/entities/inbox-message.js';
+import { WagerTransactionStatus } from '../../domain/entities/wager-transaction.js';
 import {
   InvalidCurrencyError,
   InvalidMoneyAmountError,
@@ -131,20 +133,39 @@ export class SqsWagerConsumer {
     let logicalMessageId: string | undefined;
     let result: ProcessWagerTransactionOutput | undefined;
     let failure: unknown;
+    let inbox: InboxIdentity | undefined;
+    const attempts = Number(message.Attributes?.ApproximateReceiveCount ?? '1');
     try {
       const envelope = parseEnvelope(message.Body);
       input = envelope.input;
       logicalMessageId = envelope.messageId;
-      result = await this.processWager.execute(input, {
+      inbox = {
         consumerName: this.options.consumerName,
         messageId: logicalMessageId,
         payloadHash: this.hasher.hash({
           type: 'WagerTransactionRequested',
           data: input,
         }),
-      });
+      };
+      result = await this.processWager.execute(input, inbox);
     } catch (error: unknown) {
       failure = error;
+      if (
+        input !== undefined &&
+        inbox !== undefined &&
+        permanentFailureCode(error) === undefined &&
+        attempts >= this.options.maximumAttempts
+      ) {
+        try {
+          result = await this.processWager.failAfterRetries(input, inbox);
+        } catch {
+          // Se o banco também rejeita a auditoria terminal, a DLQ preserva o comando.
+          this.logger.warn({
+            event: 'sqs_failed_audit_unavailable',
+            messageId: logicalMessageId,
+          });
+        }
+      }
     } finally {
       clearInterval(timer);
       await heartbeat;
@@ -158,7 +179,10 @@ export class SqsWagerConsumer {
       walletId: input?.walletId,
       providerId: input?.providerId,
     };
-    if (result !== undefined) {
+    if (
+      result !== undefined &&
+      result.status !== WagerTransactionStatus.Failed
+    ) {
       // A execução só retorna após commit da Inbox + financeiro + Outbox.
       // Falha no delete não transforma um resultado confirmado em rejeição.
       await this.client.send(
@@ -175,13 +199,14 @@ export class SqsWagerConsumer {
       });
       return;
     }
-    const attempts = Number(message.Attributes?.ApproximateReceiveCount ?? '1');
     const permanentCode = permanentFailureCode(failure);
     if (
+      result?.status === WagerTransactionStatus.Failed ||
       permanentCode !== undefined ||
       attempts >= this.options.maximumAttempts
     ) {
-      const code = permanentCode ?? 'PROCESSING_ATTEMPTS_EXHAUSTED';
+      const code =
+        result?.failureCode ?? permanentCode ?? 'PROCESSING_ATTEMPTS_EXHAUSTED';
       await this.client.send(
         new SendMessageCommand({
           QueueUrl: this.options.dlqUrl,

@@ -3,6 +3,7 @@
 .github
 coverage
 dist
+docs/
 node_modules
 reports
 *.log
