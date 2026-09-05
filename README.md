@@ -38,7 +38,7 @@ concorrente de apostas:
 
 O consumidor SQS usa Inbox atômica, retry limitado, DLQ e confirmação após commit.
 O publisher da Outbox usa leases no PostgreSQL, retry persistido e publicação SQS.
-A observabilidade completa também permanece pendente. Cada capacidade somente será marcada como
+As métricas operacionais obrigatórias são expostas em `/metrics`. Cada capacidade somente será marcada como
 concluída após a comprovação de suas garantias por testes unitários, de integração
 e de concorrência.
 
@@ -170,7 +170,7 @@ O header opcional `X-Correlation-Id` permite identificar esse diagnóstico.
 Recursos ausentes retornam `404`, parâmetros inválidos `400` e falhas transitórias
 reconhecidas do PostgreSQL `503` com `INFRASTRUCTURE_UNAVAILABLE`. Nos comandos,
 um reenvio deve preservar `Idempotency-Key`. As métricas de reconciliação estão
-em formato Prometheus, por processo; os demais indicadores operacionais são futuros.
+em formato Prometheus, junto aos indicadores operacionais descritos abaixo.
 
 ## Consumo SQS
 
@@ -196,7 +196,7 @@ O consumidor renova a visibilidade durante o processamento e aguarda o trabalho
 ativo no shutdown. A suíte verifica 50 duplicatas em três processos, queda após
 commit antes do ack, rollback da Inbox e financeiro, heartbeat e drenagem.
 O transporte tem entrega pelo menos uma vez; a unicidade financeira é garantida
-pelo PostgreSQL. Reprocessamento operacional da DLQ e métricas gerais são pendentes.
+pelo PostgreSQL. Reprocessamento operacional da DLQ permanece pendente.
 
 ## Publicação da Outbox
 
@@ -222,6 +222,47 @@ Consumidores devem deduplicar esse ID persistentemente na mesma transação dos
 seus efeitos. A deduplicação FIFO tem janela limitada e não substitui essa regra.
 A ordem financeira global não é garantida pelo publisher; consumidores de saldo
 devem considerar `walletVersion` para não aplicar um snapshot antigo.
+
+## Métricas e diagnóstico
+
+`GET /metrics` expõe Prometheus sem dependência de um servidor de métricas externo.
+
+| Métrica                                   | Significado                                                                                        |
+| ----------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| `wager_transactions_total{source,status}` | Resultados confirmados de comandos HTTP/SQS e transições do worker de referências; replay não soma |
+| `wager_duplicates_total{source}`          | Replays financeiros detectados                                                                     |
+| `wager_processing_failures_total{source}` | Tentativas que falharam no processador financeiro                                                  |
+| `wager_processing_duration_seconds`       | Histograma do tempo no processador, incluindo espera no banco e replays                            |
+| `wager_retries_total{component}`          | Reagendamentos confirmados de SQS, Outbox e referências                                            |
+| `wager_dlq_messages_total`                | Encaminhamentos à DLQ concluídos com ack da origem                                                 |
+| `wager_lock_conflicts_total{source,code}` | Lock timeout, deadlock e falha de serialização observados                                          |
+| `outbox_publications_total{outcome}`      | Publicações, retries e leases perdidos                                                             |
+| `outbox_pending_messages`                 | Eventos ainda não marcados como publicados no banco                                                |
+| `outbox_lag_seconds`                      | Idade do evento pendente mais antigo, incluindo eventos em retry ou lease                          |
+| `operational_metrics_collection_success`  | `1` se a coleta PostgreSQL funcionou; `0` se os gauges não puderam ser coletados                   |
+
+Contadores e histogramas são por processo e reiniciam com ele. Não substituem a
+auditoria do ledger: não incluem OPENING, comandos recusados antes de chegar ao
+processador ou operações confirmadas imediatamente antes de uma queda que impeça
+o registro da métrica. Uma referência pode contar primeiro como pendente e depois
+como processada/rejeitada. Lotes de referências que falham parcialmente podem
+subcontar resultados; o banco continua sendo a fonte auditável.
+
+Os gauges da Outbox consultam o estado compartilhado no PostgreSQL; não os some
+entre réplicas. Se a coleta falhar, os contadores continuam disponíveis e o lag
+é omitido, acompanhado de `operational_metrics_collection_success 0`, em vez de
+informar um zero enganoso. O timeout SQL dessa coleta é de 1 segundo.
+
+Exemplos de consulta: `rate(wager_transactions_total[5m])`,
+`rate(wager_duplicates_total[5m])` e
+`histogram_quantile(0.95, sum by (le) (rate(wager_processing_duration_seconds_bucket[5m])))`.
+Investigue `operational_metrics_collection_success == 0`, crescimento contínuo
+de `outbox_lag_seconds`, novos eventos de DLQ e aumento de conflitos de lock.
+
+Os labels são fixos e não incluem IDs de clientes/wallets. Logs JSON carregam
+identificadores para correlação, sem payload financeiro; erros HTTP inesperados
+são sanitizados para impedir exposição de SQL/parâmetros. Falhas de telemetria
+não alteram resultados financeiros confirmados.
 
 ## Documentação
 

@@ -4,6 +4,9 @@ import {
   Catch,
   NotFoundException,
   ServiceUnavailableException,
+  HttpException,
+  InternalServerErrorException,
+  Logger,
 } from '@nestjs/common';
 import { BaseExceptionFilter, HttpAdapterHost } from '@nestjs/core';
 import {
@@ -13,6 +16,7 @@ import {
 
 @Catch()
 export class FinancialHttpExceptionFilter extends BaseExceptionFilter {
+  private readonly safeLogger = new Logger(FinancialHttpExceptionFilter.name);
   public constructor(adapterHost: HttpAdapterHost) {
     super(adapterHost.httpAdapter);
   }
@@ -40,7 +44,18 @@ export class FinancialHttpExceptionFilter extends BaseExceptionFilter {
         host,
       );
     }
-    super.catch(error, host);
+    if (error instanceof HttpException) return super.catch(error, host);
+    this.safeLogger.error({
+      event: 'financial_http_unexpected_error',
+      code: 'INTERNAL_ERROR',
+    });
+    super.catch(
+      new InternalServerErrorException({
+        code: 'INTERNAL_ERROR',
+        message: 'Falha interna ao processar a solicitação.',
+      }),
+      host,
+    );
   }
 }
 

@@ -27,6 +27,9 @@ import { sqsConsumerProvider } from './infrastructure/messaging/sqs-consumer.pro
 import { SqsConsumerRunner } from './infrastructure/messaging/sqs-consumer.runner.js';
 import { outboxProviders } from './infrastructure/messaging/outbox.providers.js';
 import { OutboxScheduler } from './infrastructure/scheduling/outbox.scheduler.js';
+import { OperationalTelemetry } from './infrastructure/observability/operational.telemetry.js';
+import { ObservedWagerProcessor } from './infrastructure/observability/observed-wager.processor.js';
+import { OperationalMetricsService } from './infrastructure/observability/operational-metrics.service.js';
 
 const openWalletProvider: Provider = {
   provide: OpenWalletUseCase,
@@ -41,10 +44,16 @@ const openWalletProvider: Provider = {
 
 const processWagerTransactionProvider: Provider = {
   provide: ProcessWagerTransactionUseCase,
-  inject: [EntityManager],
-  useFactory: (entityManager: EntityManager): ProcessWagerTransactionUseCase =>
+  inject: [EntityManager, OperationalTelemetry],
+  useFactory: (
+    entityManager: EntityManager,
+    telemetry: OperationalTelemetry,
+  ): ProcessWagerTransactionUseCase =>
     new ProcessWagerTransactionUseCase(
-      new MikroOrmWagerTransactionProcessor(entityManager),
+      new ObservedWagerProcessor(
+        new MikroOrmWagerTransactionProcessor(entityManager),
+        telemetry,
+      ),
       new UuidGenerator(),
       new SystemClock(),
       new Sha256PayloadHasher(),
@@ -53,12 +62,16 @@ const processWagerTransactionProvider: Provider = {
 
 const reprocessPendingReferencesProvider: Provider = {
   provide: ReprocessPendingReferencesUseCase,
-  inject: [EntityManager],
+  inject: [EntityManager, OperationalTelemetry],
   useFactory: (
     entityManager: EntityManager,
+    telemetry: OperationalTelemetry,
   ): ReprocessPendingReferencesUseCase =>
     new ReprocessPendingReferencesUseCase(
-      new MikroOrmWagerTransactionProcessor(entityManager),
+      new ObservedWagerProcessor(
+        new MikroOrmWagerTransactionProcessor(entityManager),
+        telemetry,
+      ),
       new SystemClock(),
     ),
 };
@@ -75,6 +88,8 @@ const reprocessPendingReferencesProvider: Provider = {
   ],
   controllers: [WalletController, WageringController, WalletQueriesController],
   providers: [
+    OperationalTelemetry,
+    OperationalMetricsService,
     ...outboxProviders,
     OutboxScheduler,
     sqsConsumerProvider,

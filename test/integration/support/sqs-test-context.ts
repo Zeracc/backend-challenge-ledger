@@ -19,6 +19,7 @@ import type {
   ProcessWagerTransactionUseCase,
 } from '../../../src/modules/wallet/application/use-cases/process-wager-transaction.js';
 import { WagerTestContext } from './wager-test-context.js';
+import type { OperationalTelemetry } from '../../../src/modules/wallet/infrastructure/observability/operational.telemetry.js';
 
 export class SqsTestContext extends WagerTestContext {
   public readonly client = new SQSClient({
@@ -106,8 +107,14 @@ export class SqsTestContext extends WagerTestContext {
   public consumer(
     overrides: Partial<SqsConsumerOptions> = {},
     useCase: ProcessWagerTransactionUseCase = this.createUseCase(),
+    telemetry?: OperationalTelemetry,
   ): SqsWagerConsumer {
-    return new SqsWagerConsumer(this.client, useCase, this.options(overrides));
+    return new SqsWagerConsumer(
+      this.client,
+      useCase,
+      this.options(overrides),
+      telemetry,
+    );
   }
   public async deadLetter(): Promise<Message | undefined> {
     const response = await this.client.send(

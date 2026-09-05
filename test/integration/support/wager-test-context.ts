@@ -23,6 +23,8 @@ import { Sha256PayloadHasher } from '../../../src/shared/infrastructure/serializ
 import { SystemClock } from '../../../src/shared/infrastructure/system/system-clock.js';
 import { UuidGenerator } from '../../../src/shared/infrastructure/system/uuid-generator.js';
 import { createWalletTestOrm } from './wallet-test-orm.js';
+import { ObservedWagerProcessor } from '../../../src/modules/wallet/infrastructure/observability/observed-wager.processor.js';
+import type { OperationalTelemetry } from '../../../src/modules/wallet/infrastructure/observability/operational.telemetry.js';
 
 export interface WalletRow {
   balance: string;
@@ -111,9 +113,13 @@ export class WagerTestContext {
     instance: MikroORM = this.getOrm(),
     idGenerator: IdGenerator = new UuidGenerator(),
     clock: Clock = new SystemClock(),
+    telemetry?: OperationalTelemetry,
   ): ProcessWagerTransactionUseCase {
+    const processor = new MikroOrmWagerTransactionProcessor(instance.em.fork());
     return new ProcessWagerTransactionUseCase(
-      new MikroOrmWagerTransactionProcessor(instance.em.fork()),
+      telemetry === undefined
+        ? processor
+        : new ObservedWagerProcessor(processor, telemetry),
       idGenerator,
       clock,
       new Sha256PayloadHasher(),
