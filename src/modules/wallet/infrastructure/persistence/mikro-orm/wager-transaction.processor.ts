@@ -41,6 +41,8 @@ import { OutboxMessageRecord } from './entities/outbox-message.record.js';
 import { WagerTransactionRecord } from './entities/wager-transaction.record.js';
 import { WalletLedgerEntryRecord } from './entities/wallet-ledger-entry.record.js';
 import { WalletRecord } from './entities/wallet.record.js';
+import { InboxMessage } from '../../../domain/entities/inbox-message.js';
+import { InboxMessageRecord } from './entities/inbox-message.record.js';
 
 export class MikroOrmWagerTransactionProcessor
   implements WagerTransactionProcessor, PendingReferenceProcessor
@@ -56,10 +58,24 @@ export class MikroOrmWagerTransactionProcessor
     const external = requireExternalIdentity(command.transaction);
 
     try {
-      return await this.entityManager.transactional((transactionManager) =>
-        this.processWithinTransaction(transactionManager, command),
-      );
+      return await this.entityManager
+        .fork()
+        .transactional((transactionManager) =>
+          this.processWithInbox(transactionManager, command),
+        );
     } catch (error: unknown) {
+      if (
+        command.inbox !== undefined &&
+        error instanceof UniqueConstraintViolationException &&
+        (error.message.includes('inbox_messages_pkey') ||
+          error.message.includes('wager_transactions_idempotency_key_unique'))
+      ) {
+        // A escrita vencedora já confirmou antes de a violação de unicidade retornar.
+        // Repetir a transação inteira também confirma a Inbox do replay.
+        return this.entityManager
+          .fork()
+          .transactional((em) => this.processWithInbox(em, command));
+      }
       if (
         error instanceof UniqueConstraintViolationException &&
         error.message.includes('wager_transactions_idempotency_key_unique')
@@ -84,6 +100,38 @@ export class MikroOrmWagerTransactionProcessor
 
       throw error;
     }
+  }
+
+  private async processWithInbox(
+    em: EntityManager,
+    command: ProcessWagerTransactionCommand,
+  ): Promise<ProcessWagerTransactionResult> {
+    if (command.inbox === undefined)
+      return this.processWithinTransaction(em, command);
+    await em.execute("set local lock_timeout = '5s'");
+    await em.execute("set local statement_timeout = '10s'");
+    const identity = command.inbox;
+    let record = await em.findOne(
+      InboxMessageRecord,
+      { consumerName: identity.consumerName, messageId: identity.messageId },
+      { lockMode: LockMode.PESSIMISTIC_WRITE },
+    );
+    const message =
+      record?.toDomain() ??
+      InboxMessage.receive({ ...identity, receivedAt: command.occurredAt });
+    message.assertPayload(identity.payloadHash);
+    if (record === null) {
+      record = new InboxMessageRecord(message);
+      em.persist(record);
+      await em.flush();
+    }
+    const result = await this.processWithinTransaction(em, command);
+    if (!message.isProcessed()) {
+      message.markProcessed(result.transactionId, command.occurredAt);
+      record.apply(message);
+      await em.flush();
+    }
+    return result;
   }
 
   public async reprocessDue(

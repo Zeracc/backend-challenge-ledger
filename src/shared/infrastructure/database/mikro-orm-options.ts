@@ -7,11 +7,13 @@ import { WagerTransactionRecord } from '../../../modules/wallet/infrastructure/p
 import { WalletLedgerEntryRecord } from '../../../modules/wallet/infrastructure/persistence/mikro-orm/entities/wallet-ledger-entry.record.js';
 import { WalletRecord } from '../../../modules/wallet/infrastructure/persistence/mikro-orm/entities/wallet.record.js';
 import { loadPostgreSqlSettings } from './postgresql-settings.js';
+import { InboxMessageRecord } from '../../../modules/wallet/infrastructure/persistence/mikro-orm/entities/inbox-message.record.js';
 
 export const mikroOrmOptions = defineConfig({
   ...loadPostgreSqlSettings(),
   forceUndefined: true,
   entities: [
+    InboxMessageRecord,
     WalletRecord,
     WagerTransactionRecord,
     WalletLedgerEntryRecord,

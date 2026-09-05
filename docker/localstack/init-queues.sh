@@ -3,7 +3,7 @@ set -eu
 
 dlq_url="$(
   awslocal sqs create-queue \
-    --queue-name wagering-transactions-dlq.fifo \
+    --queue-name wager-transactions-dlq.fifo \
     --attributes FifoQueue=true,ContentBasedDeduplication=true \
     --query QueueUrl \
     --output text
@@ -18,6 +18,6 @@ dlq_arn="$(
 )"
 
 awslocal sqs create-queue \
-  --queue-name wagering-transactions.fifo \
+  --queue-name wager-transactions.fifo \
   --attributes "{\"FifoQueue\":\"true\",\"ContentBasedDeduplication\":\"false\",\"RedrivePolicy\":\"{\\\"deadLetterTargetArn\\\":\\\"${dlq_arn}\\\",\\\"maxReceiveCount\\\":\\\"5\\\"}\"}" \
   >/dev/null

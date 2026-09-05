@@ -22,6 +22,9 @@ import { WalletQueriesController } from './presentation/http/wallet-queries.cont
 import { QueryWalletUseCase } from './application/use-cases/query-wallet.js';
 import { MikroOrmWalletReadRepository } from './infrastructure/persistence/mikro-orm/wallet-read.repository.js';
 import { ReconciliationTelemetry } from './infrastructure/observability/reconciliation.telemetry.js';
+import { InboxMessageRecord } from './infrastructure/persistence/mikro-orm/entities/inbox-message.record.js';
+import { sqsConsumerProvider } from './infrastructure/messaging/sqs-consumer.provider.js';
+import { SqsConsumerRunner } from './infrastructure/messaging/sqs-consumer.runner.js';
 
 const openWalletProvider: Provider = {
   provide: OpenWalletUseCase,
@@ -61,6 +64,7 @@ const reprocessPendingReferencesProvider: Provider = {
 @Module({
   imports: [
     MikroOrmModule.forFeature([
+      InboxMessageRecord,
       WalletRecord,
       WagerTransactionRecord,
       WalletLedgerEntryRecord,
@@ -69,6 +73,8 @@ const reprocessPendingReferencesProvider: Provider = {
   ],
   controllers: [WalletController, WageringController, WalletQueriesController],
   providers: [
+    sqsConsumerProvider,
+    SqsConsumerRunner,
     openWalletProvider,
     processWagerTransactionProvider,
     reprocessPendingReferencesProvider,
