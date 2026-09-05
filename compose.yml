@@ -3,6 +3,19 @@ name: backend-challenge-ledger
 services:
   postgres:
     image: postgres:17.11-alpine
+    # SQL errors can contain financial values. Application logs retain safe codes.
+    command:
+      - postgres
+      - -c
+      - log_min_messages=fatal
+      - -c
+      - log_min_error_statement=panic
+      - -c
+      - log_error_verbosity=terse
+      - -c
+      - log_parameter_max_length=0
+      - -c
+      - log_parameter_max_length_on_error=0
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-wagering}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-wagering}

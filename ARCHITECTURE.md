@@ -372,6 +372,21 @@ Os endpoints de health permanecem públicos. O SQS é tratado como canal
 interno confiável, mas a identidade do provedor contida em cada mensagem continua
 sujeita às validações de domínio.
 
+## Proteção dos logs de infraestrutura
+
+SafeConsoleLogger retém somente eventos de erro conhecidos e o código
+INTERNAL_ERROR. Descarta exceções, stack, contexto e metadados adicionais no
+nível de erro, incluindo falhas de inicialização emitidas pelo próprio Nest.
+Os logs operacionais de sucesso/retry usam campos explícitos de correlação,
+sem payload. O ORM tem debug SQL explicitamente desabilitado.
+
+PostgreSQL pode incluir valores no texto principal do erro, além de DETAIL e
+STATEMENT. Por isso, Compose e CI suprimem mensagens abaixo de FATAL, detalhes,
+instruções de erro e parâmetros. O custo é perder diagnóstico SQL bruto; a API
+preserva códigos/eventos seguros e métricas. Investigações com logs detalhados
+exigem ambiente isolado e dados sintéticos. Essa configuração não corrige logs
+históricos nem protege dados armazenados na Inbox/Outbox/DLQ contra acesso indevido.
+
 ## Estratégia de verificação
 
 Testes unitários verificam as regras puras de domínio. Testes de integração e de

@@ -11,6 +11,7 @@ import { InboxMessageRecord } from '../../../modules/wallet/infrastructure/persi
 
 export const mikroOrmOptions = defineConfig({
   ...loadPostgreSqlSettings(),
+  debug: false,
   forceUndefined: true,
   entities: [
     InboxMessageRecord,
