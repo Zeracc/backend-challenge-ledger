@@ -2,12 +2,14 @@ import { type Provider } from '@nestjs/common';
 import { SQSClient } from '@aws-sdk/client-sqs';
 import { ProcessWagerTransactionUseCase } from '../../application/use-cases/process-wager-transaction.js';
 import { SqsWagerConsumer } from './sqs-wager-consumer.js';
+import { OperationalTelemetry } from '../observability/operational.telemetry.js';
 
 export const sqsConsumerProvider: Provider = {
   provide: SqsWagerConsumer,
-  inject: [ProcessWagerTransactionUseCase],
+  inject: [ProcessWagerTransactionUseCase, OperationalTelemetry],
   useFactory: (
     processWager: ProcessWagerTransactionUseCase,
+    telemetry: OperationalTelemetry,
   ): SqsWagerConsumer => {
     const endpoint = process.env.SQS_ENDPOINT ?? 'http://127.0.0.1:4566';
     const client = new SQSClient({
@@ -20,19 +22,24 @@ export const sqsConsumerProvider: Provider = {
         throwOnRequestTimeout: true,
       },
     });
-    return new SqsWagerConsumer(client, processWager, {
-      queueUrl:
-        process.env.SQS_QUEUE_URL ??
-        `${endpoint}/000000000000/wager-transactions.fifo`,
-      dlqUrl:
-        process.env.SQS_DLQ_URL ??
-        `${endpoint}/000000000000/wager-transactions-dlq.fifo`,
-      consumerName: 'wager-transactions-v1',
-      maximumAttempts: 5,
-      visibilitySeconds: 30,
-      waitSeconds: 20,
-      baseRetrySeconds: 1,
-      maximumRetrySeconds: 60,
-    });
+    return new SqsWagerConsumer(
+      client,
+      processWager,
+      {
+        queueUrl:
+          process.env.SQS_QUEUE_URL ??
+          `${endpoint}/000000000000/wager-transactions.fifo`,
+        dlqUrl:
+          process.env.SQS_DLQ_URL ??
+          `${endpoint}/000000000000/wager-transactions-dlq.fifo`,
+        consumerName: 'wager-transactions-v1',
+        maximumAttempts: 5,
+        visibilitySeconds: 30,
+        waitSeconds: 20,
+        baseRetrySeconds: 1,
+        maximumRetrySeconds: 60,
+      },
+      telemetry,
+    );
   },
 };

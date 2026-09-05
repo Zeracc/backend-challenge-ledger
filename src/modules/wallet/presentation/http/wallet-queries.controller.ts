@@ -9,6 +9,7 @@ import {
   Param,
   Post,
   Query,
+  Optional,
   UseFilters,
   UseGuards,
 } from '@nestjs/common';
@@ -16,6 +17,7 @@ import { NoOpAuthGuard } from '../../../../shared/presentation/http/no-op-auth.g
 import { FinancialHttpExceptionFilter } from './financial-http-exception.filter.js';
 import { QueryWalletUseCase } from '../../application/use-cases/query-wallet.js';
 import { ReconciliationTelemetry } from '../../infrastructure/observability/reconciliation.telemetry.js';
+import { OperationalMetricsService } from '../../infrastructure/observability/operational-metrics.service.js';
 import type {
   WalletView,
   LedgerPage,
@@ -30,6 +32,7 @@ export class WalletQueriesController {
   public constructor(
     private readonly queries: QueryWalletUseCase,
     private readonly telemetry: ReconciliationTelemetry,
+    @Optional() private readonly operations?: OperationalMetricsService,
   ) {}
 
   @Get('wallets/:walletId')
@@ -103,8 +106,8 @@ export class WalletQueriesController {
 
   @Get('metrics')
   @Header('content-type', 'text/plain; version=0.0.4; charset=utf-8')
-  public metrics(): string {
-    return this.telemetry.render();
+  public async metrics(): Promise<string> {
+    return this.telemetry.render() + ((await this.operations?.render()) ?? '');
   }
 }
 

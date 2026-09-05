@@ -1,4 +1,8 @@
-import { Logger, type Provider } from '@nestjs/common';
+import {
+  OperationalTelemetry,
+  safelyObserve,
+} from '../observability/operational.telemetry.js';
+import { type Provider } from '@nestjs/common';
 import { EntityManager } from '@mikro-orm/postgresql';
 import { SQSClient } from '@aws-sdk/client-sqs';
 import { PublishOutboxUseCase } from '../../application/use-cases/publish-outbox.js';
@@ -39,12 +43,12 @@ export const outboxProviders: Provider[] = [
   },
   {
     provide: PublishOutboxUseCase,
-    inject: [EntityManager, SqsEventPublisher],
+    inject: [EntityManager, SqsEventPublisher, OperationalTelemetry],
     useFactory: (
       em: EntityManager,
       transport: SqsEventPublisher,
+      telemetry: OperationalTelemetry,
     ): PublishOutboxUseCase => {
-      const logger = new Logger('OutboxPublisher');
       return new PublishOutboxUseCase(
         new MikroOrmOutboxRepository(em.fork()),
         transport,
@@ -52,20 +56,7 @@ export const outboxProviders: Provider[] = [
         new SystemClock(),
         {
           record: (outcome, message): void => {
-            const payload = message.payload;
-            const data = payload.data as Record<string, unknown> | undefined;
-            const context = {
-              event: `outbox_${outcome}`,
-              eventId: message.id,
-              eventType: message.eventType,
-              correlationId: payload.correlationId,
-              transactionId: data?.transactionId,
-              walletId: data?.walletId,
-              providerId: data?.providerId,
-              attempts: message.attempts,
-            };
-            if (outcome === 'published') logger.log(context);
-            else logger.warn(context);
+            safelyObserve(() => telemetry.record(outcome, message));
           },
         },
       );

@@ -247,9 +247,29 @@ O SDK SQS é abortado ao atingir o timeout. O timeout da resposta PostgreSQL nã
 cancela uma eventual aquisição de conexão em andamento no driver; não implica
 que a dependência tenha sido desligada. O CI provisiona PostgreSQL e LocalStack.
 
-O bootstrap configura logs JSON. A instrumentação de reconciliação exporta
-contadores por instância sem labels de alta cardinalidade. Métricas gerais de
-transações, retries, DLQ, locks, lag de outbox e latência permanecem futuras.
+O bootstrap configura logs JSON. Reconciliação e operações exportam contadores
+por instância sem labels de alta cardinalidade. O decorator ObservedWagerProcessor
+envolve a porta financeira e registra resultados somente após o retorno do commit.
+Replay incrementa duplicatas, sem incrementar novamente o contador de resultados.
+O histograma mede a execução no processador, incluindo locks e replays, sem
+misturar métricas com a aritmética monetária do domínio.
+
+SQS registra reagendamento após ChangeMessageVisibility e DLQ após envio/ack.
+O observer da Outbox registra publicação, retry e lease perdido. O worker de
+referências registra os resultados de lotes concluídos. A instrumentação é
+best effort por instância; uma queda ou lote parcialmente falho pode subcontar
+eventos. O ledger e os estados persistidos continuam sendo a trilha auditável.
+
+OperationalMetricsService consulta pendências e idade do evento mais antigo no
+PostgreSQL, em transação de leitura com statement_timeout de 1s. A query usa
+apenas contagem/tempo e não lê saldos. Falha de coleta omite os gauges e retorna
+collection_success=0, preservando contadores e sem inventar lag zero. Os gauges
+são globais ao banco e não devem ser somados entre réplicas.
+
+Callbacks de telemetria são isolados da decisão financeira. O filtro HTTP
+sanitiza exceções inesperadas em vez de permitir ao logger padrão imprimir SQL
+e parâmetros. Testes forçam erro do banco e erro de telemetria para comprovar
+rollback quando necessário, resposta após commit e ausência de payload nos logs.
 Os endpoints financeiros reconhecem erros transitórios do PostgreSQL e retornam
 503 com código estável; erros inesperados continuam distintos como 500.
 

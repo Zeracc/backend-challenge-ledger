@@ -1,5 +1,7 @@
 import { createHash } from 'node:crypto';
 import { Logger } from '@nestjs/common';
+import type { OperationalTelemetry } from '../observability/operational.telemetry.js';
+import { safelyObserve } from '../observability/operational.telemetry.js';
 import {
   ChangeMessageVisibilityCommand,
   DeleteMessageCommand,
@@ -52,6 +54,7 @@ export class SqsWagerConsumer {
     private readonly client: SQSClient,
     private readonly processWager: ProcessWagerTransactionUseCase,
     private readonly options: SqsConsumerOptions,
+    private readonly telemetry?: OperationalTelemetry,
   ) {
     if (
       !options.queueUrl ||
@@ -203,6 +206,7 @@ export class SqsWagerConsumer {
           ReceiptHandle: receipt,
         }),
       );
+      safelyObserve(() => this.telemetry?.deadLetter());
       this.logger.warn({
         event: 'sqs_wager_dead_lettered',
         ...context,
@@ -216,6 +220,7 @@ export class SqsWagerConsumer {
         2 ** Math.min(20, Math.max(0, attempts - 1)),
     );
     await this.visibility(receipt, delay);
+    safelyObserve(() => this.telemetry?.retry('sqs'));
     this.logger.warn({
       event: 'sqs_wager_retry_scheduled',
       ...context,
