@@ -64,6 +64,9 @@ export interface WagerTransactionState {
   payloadHash?: string | undefined;
   referenceExternalTransactionId?: string | undefined;
   referenceTransactionId?: string | undefined;
+  referenceAttempts?: number | undefined;
+  nextReferenceAttemptAt?: Date | undefined;
+  referenceExpiresAt?: Date | undefined;
   walletId: string;
   playerId: string;
   roundId?: string | undefined;
@@ -86,6 +89,9 @@ export class WagerTransaction {
     public readonly payloadHash: string | undefined,
     public readonly referenceExternalTransactionId: string | undefined,
     private currentReferenceTransactionId: string | undefined,
+    private currentReferenceAttempts: number,
+    private currentNextReferenceAttemptAt: Date | undefined,
+    private currentReferenceExpiresAt: Date | undefined,
     public readonly walletId: string,
     public readonly playerId: string,
     public readonly roundId: string | undefined,
@@ -112,6 +118,9 @@ export class WagerTransaction {
       undefined,
       undefined,
       undefined,
+      undefined,
+      undefined,
+      0,
       undefined,
       undefined,
       props.walletId,
@@ -170,6 +179,13 @@ export class WagerTransaction {
       state.payloadHash,
       state.referenceExternalTransactionId,
       state.referenceTransactionId,
+      state.referenceAttempts ?? 0,
+      state.nextReferenceAttemptAt === undefined
+        ? undefined
+        : new Date(state.nextReferenceAttemptAt.getTime()),
+      state.referenceExpiresAt === undefined
+        ? undefined
+        : new Date(state.referenceExpiresAt.getTime()),
       state.walletId,
       state.playerId,
       state.roundId,
@@ -202,6 +218,22 @@ export class WagerTransaction {
     return this.currentReferenceTransactionId;
   }
 
+  public get referenceAttempts(): number {
+    return this.currentReferenceAttempts;
+  }
+
+  public get nextReferenceAttemptAt(): Date | undefined {
+    return this.currentNextReferenceAttemptAt === undefined
+      ? undefined
+      : new Date(this.currentNextReferenceAttemptAt.getTime());
+  }
+
+  public get referenceExpiresAt(): Date | undefined {
+    return this.currentReferenceExpiresAt === undefined
+      ? undefined
+      : new Date(this.currentReferenceExpiresAt.getTime());
+  }
+
   public get createdAt(): Date {
     return new Date(this.creationDate.getTime());
   }
@@ -222,6 +254,7 @@ export class WagerTransaction {
     this.currentStatus = WagerTransactionStatus.Processed;
     this.currentResultBalance = balanceAfter;
     this.currentReferenceTransactionId = referenceTransactionId;
+    this.clearReferenceSchedule();
     this.processingDate = new Date(at.getTime());
   }
 
@@ -236,9 +269,14 @@ export class WagerTransaction {
     this.currentFailureCode = code;
     this.currentResultBalance = balance;
     this.currentReferenceTransactionId = referenceTransactionId;
+    this.clearReferenceSchedule();
   }
 
-  public markPendingReference(balance: Money): void {
+  public markPendingReference(
+    balance: Money,
+    nextAttemptAt: Date,
+    expiresAt: Date,
+  ): void {
     this.assertNotTerminal();
     this.assertResultCurrency(balance);
 
@@ -250,6 +288,35 @@ export class WagerTransaction {
 
     this.currentStatus = WagerTransactionStatus.PendingReference;
     this.currentResultBalance = balance;
+    this.currentReferenceAttempts = 0;
+    this.currentNextReferenceAttemptAt = new Date(nextAttemptAt.getTime());
+    this.currentReferenceExpiresAt = new Date(expiresAt.getTime());
+  }
+
+  public isReferenceDue(at: Date): boolean {
+    return (
+      this.currentStatus === WagerTransactionStatus.PendingReference &&
+      this.currentNextReferenceAttemptAt !== undefined &&
+      this.currentNextReferenceAttemptAt.getTime() <= at.getTime()
+    );
+  }
+
+  public hasReferenceRetryExpired(at: Date, maximumAttempts: number): boolean {
+    return (
+      this.currentStatus === WagerTransactionStatus.PendingReference &&
+      (this.currentReferenceAttempts >= maximumAttempts ||
+        (this.currentReferenceExpiresAt !== undefined &&
+          this.currentReferenceExpiresAt.getTime() <= at.getTime()))
+    );
+  }
+
+  public scheduleReferenceRetry(nextAttemptAt: Date): void {
+    if (this.currentStatus !== WagerTransactionStatus.PendingReference) {
+      throw new InvalidTransactionStateError();
+    }
+
+    this.currentReferenceAttempts += 1;
+    this.currentNextReferenceAttemptAt = new Date(nextAttemptAt.getTime());
   }
 
   public referenceFailureFor(
@@ -317,6 +384,11 @@ export class WagerTransaction {
     }
   }
 
+  private clearReferenceSchedule(): void {
+    this.currentNextReferenceAttemptAt = undefined;
+    this.currentReferenceExpiresAt = undefined;
+  }
+
   private assertResultCurrency(balance: Money): void {
     if (this.money.currency !== balance.currency) {
       throw new InvalidWagerTransactionError(
@@ -382,6 +454,9 @@ export class WagerTransaction {
       props.idempotencyKey,
       props.payloadHash,
       props.referenceExternalTransactionId,
+      undefined,
+      0,
+      undefined,
       undefined,
       props.walletId,
       props.playerId,

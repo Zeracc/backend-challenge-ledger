@@ -56,6 +56,15 @@ export class WagerTransactionRecord {
   @Property({ type: 'uuid', nullable: true })
   public referenceTransactionId: string | undefined;
 
+  @Property({ type: 'integer' })
+  public referenceAttempts = 0;
+
+  @Property({ columnType: 'timestamptz(3)', nullable: true })
+  public nextReferenceAttemptAt: Date | undefined;
+
+  @Property({ columnType: 'timestamptz(3)', nullable: true })
+  public referenceExpiresAt: Date | undefined;
+
   @Property({ length: 50, nullable: true })
   public failureCode: string | undefined;
 
@@ -96,10 +105,33 @@ export class WagerTransactionRecord {
     this.referenceExternalTransactionId =
       transaction.referenceExternalTransactionId;
     this.referenceTransactionId = transaction.referenceTransactionId;
+    this.referenceAttempts = transaction.referenceAttempts;
+    this.nextReferenceAttemptAt = transaction.nextReferenceAttemptAt;
+    this.referenceExpiresAt = transaction.referenceExpiresAt;
     this.failureCode = transaction.failureCode;
     this.resultBalance = resultBalance.toString();
     this.resultCurrency = resultBalance.currency;
     this.createdAt = transaction.createdAt;
+    this.processedAt = transaction.processedAt;
+  }
+
+  public apply(transaction: WagerTransaction): void {
+    const resultBalance = transaction.resultBalance;
+
+    if (resultBalance === undefined) {
+      throw new Error(
+        'Uma transação persistida precisa possuir saldo resultante.',
+      );
+    }
+
+    this.status = transaction.status;
+    this.referenceTransactionId = transaction.referenceTransactionId;
+    this.referenceAttempts = transaction.referenceAttempts;
+    this.nextReferenceAttemptAt = transaction.nextReferenceAttemptAt;
+    this.referenceExpiresAt = transaction.referenceExpiresAt;
+    this.failureCode = transaction.failureCode;
+    this.resultBalance = resultBalance.toString();
+    this.resultCurrency = resultBalance.currency;
     this.processedAt = transaction.processedAt;
   }
 
@@ -112,6 +144,9 @@ export class WagerTransactionRecord {
       payloadHash: this.payloadHash,
       referenceExternalTransactionId: this.referenceExternalTransactionId,
       referenceTransactionId: this.referenceTransactionId,
+      referenceAttempts: this.referenceAttempts,
+      nextReferenceAttemptAt: this.nextReferenceAttemptAt,
+      referenceExpiresAt: this.referenceExpiresAt,
       walletId: this.walletId,
       playerId: this.playerId,
       roundId: this.roundId,

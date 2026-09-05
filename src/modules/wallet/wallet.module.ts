@@ -8,12 +8,14 @@ import { Sha256PayloadHasher } from '../../shared/infrastructure/serialization/s
 import { NoOpAuthGuard } from '../../shared/presentation/http/no-op-auth.guard.js';
 import { OpenWalletUseCase } from './application/use-cases/open-wallet.js';
 import { ProcessWagerTransactionUseCase } from './application/use-cases/process-wager-transaction.js';
+import { ReprocessPendingReferencesUseCase } from './application/use-cases/reprocess-pending-references.js';
 import { MikroOrmWagerTransactionProcessor } from './infrastructure/persistence/mikro-orm/wager-transaction.processor.js';
 import { OutboxMessageRecord } from './infrastructure/persistence/mikro-orm/entities/outbox-message.record.js';
 import { WagerTransactionRecord } from './infrastructure/persistence/mikro-orm/entities/wager-transaction.record.js';
 import { WalletLedgerEntryRecord } from './infrastructure/persistence/mikro-orm/entities/wallet-ledger-entry.record.js';
 import { WalletRecord } from './infrastructure/persistence/mikro-orm/entities/wallet.record.js';
 import { MikroOrmWalletOpeningRepository } from './infrastructure/persistence/mikro-orm/wallet-opening.repository.js';
+import { PendingReferenceScheduler } from './infrastructure/scheduling/pending-reference.scheduler.js';
 import { WalletController } from './presentation/http/wallet.controller.js';
 import { WageringController } from './presentation/http/wagering.controller.js';
 
@@ -40,6 +42,18 @@ const processWagerTransactionProvider: Provider = {
     ),
 };
 
+const reprocessPendingReferencesProvider: Provider = {
+  provide: ReprocessPendingReferencesUseCase,
+  inject: [EntityManager],
+  useFactory: (
+    entityManager: EntityManager,
+  ): ReprocessPendingReferencesUseCase =>
+    new ReprocessPendingReferencesUseCase(
+      new MikroOrmWagerTransactionProcessor(entityManager),
+      new SystemClock(),
+    ),
+};
+
 @Module({
   imports: [
     MikroOrmModule.forFeature([
@@ -53,6 +67,8 @@ const processWagerTransactionProvider: Provider = {
   providers: [
     openWalletProvider,
     processWagerTransactionProvider,
+    reprocessPendingReferencesProvider,
+    PendingReferenceScheduler,
     NoOpAuthGuard,
   ],
 })

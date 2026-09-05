@@ -11,6 +11,7 @@ import type {
   ProcessWagerTransactionResult,
   WagerTransactionProcessor,
 } from '../ports/wager-transaction.processor.js';
+import { PendingReferenceRetryPolicy } from '../pending-reference-retry-policy.js';
 
 export type ProcessableWagerTransactionKind =
   | WagerTransactionKind.Bet
@@ -40,6 +41,7 @@ export class ProcessWagerTransactionUseCase {
     private readonly idGenerator: IdGenerator,
     private readonly clock: Clock,
     private readonly payloadHasher: PayloadHasher,
+    private readonly pendingReferenceRetryPolicy = new PendingReferenceRetryPolicy(),
   ) {}
 
   public async execute(
@@ -91,6 +93,8 @@ export class ProcessWagerTransactionUseCase {
       rejectedEventId: this.idGenerator.generate(),
       balanceChangedEventId: this.idGenerator.generate(),
       occurredAt,
+      referenceExpiresAt:
+        this.pendingReferenceRetryPolicy.expiresAt(occurredAt),
     });
   }
 }
