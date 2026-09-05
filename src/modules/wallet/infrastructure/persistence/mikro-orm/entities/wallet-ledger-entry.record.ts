@@ -14,6 +14,9 @@ import type { WalletLedgerEntry } from '../../../../domain/entities/wallet-ledge
   properties: ['walletId', 'transactionId'],
 })
 export class WalletLedgerEntryRecord {
+  @Property({ type: 'bigint', autoincrement: true })
+  public sequence?: string;
+
   @PrimaryKey({ type: 'uuid' })
   public id: string;
 

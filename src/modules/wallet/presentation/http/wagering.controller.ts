@@ -14,6 +14,8 @@ import {
 } from '@nestjs/common';
 
 import { NoOpAuthGuard } from '../../../../shared/presentation/http/no-op-auth.guard.js';
+import { UseFilters } from '@nestjs/common';
+import { FinancialHttpExceptionFilter } from './financial-http-exception.filter.js';
 import {
   ProcessWagerTransactionUseCase,
   type ProcessableWagerTransactionKind,
@@ -43,6 +45,7 @@ const UUID_PATTERN =
 
 @Controller('wagering/transactions')
 @UseGuards(NoOpAuthGuard)
+@UseFilters(FinancialHttpExceptionFilter)
 export class WageringController {
   public constructor(
     private readonly processWagerTransaction: ProcessWagerTransactionUseCase,

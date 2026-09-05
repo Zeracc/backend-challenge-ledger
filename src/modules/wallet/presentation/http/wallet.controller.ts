@@ -6,9 +6,11 @@ import {
   HttpCode,
   Post,
   UseGuards,
+  UseFilters,
 } from '@nestjs/common';
 
 import { NoOpAuthGuard } from '../../../../shared/presentation/http/no-op-auth.guard.js';
+import { FinancialHttpExceptionFilter } from './financial-http-exception.filter.js';
 import {
   OpenWalletUseCase,
   type OpenWalletInput,
@@ -29,6 +31,7 @@ const UUID_PATTERN =
 
 @Controller('wallets')
 @UseGuards(NoOpAuthGuard)
+@UseFilters(FinancialHttpExceptionFilter)
 export class WalletController {
   public constructor(private readonly openWallet: OpenWalletUseCase) {}
 

@@ -26,14 +26,18 @@ concorrente de apostas:
 - referência opcional de `WIN` a uma `BET` da mesma rodada;
 - `REFUND` integral de `BET` e `ROLLBACK` com efeito financeiro inverso;
 - referências ausentes persistidas como `PENDING_REFERENCE`, com resposta `202`;
+- reprocessamento agendado de referências com backoff e expiração persistidos;
+- consultas de wallet, ledger paginado e transações por identidade interna/externa;
+- reconciliação consistente, sem correção automática de divergências;
+- readiness real de PostgreSQL/SQS e métricas de reconciliação;
 - idempotência persistente por chave e hash canônico SHA-256;
 - rejeição auditável por saldo insuficiente, sem lançamento no ledger;
 - endpoint `POST /wagering/transactions` com replay e conflitos distintos;
 - testes de 50 duplicatas concorrentes em três processos Bun;
 - documentos de arquitetura e rastreabilidade dos critérios de aceite.
 
-O reprocessamento agendado de `PENDING_REFERENCE`, SQS e o publisher da outbox
-ainda não foram implementados. Cada capacidade somente será marcada como
+O consumidor SQS/Inbox/DLQ e o publisher da outbox ainda não foram implementados.
+A observabilidade completa também permanece pendente. Cada capacidade somente será marcada como
 concluída após a comprovação de suas garantias por testes unitários, de integração
 e de concorrência.
 
@@ -69,8 +73,10 @@ bun run start:dev
 ```
 
 O endpoint de liveness estará disponível em
-`GET http://localhost:3000/health/live`. O endpoint de readiness será adicionado
-junto aos adaptadores do PostgreSQL e do SQS.
+`GET http://localhost:3000/health/live`. `GET /health/ready` retorna `200` quando
+PostgreSQL e SQS respondem e `503` quando algum deles falha ou excede 1,5 segundo.
+As verificações de dependências são paralelas; liveness permanece independente.
+O probe SQS usa `ListQueues` e exige credenciais com essa permissão.
 
 Para subir a API por Docker, o serviço one-shot `migrate` aplica as migrations
 antes da inicialização:
@@ -117,6 +123,10 @@ status `PENDING_REFERENCE`. `REFUND` e `ROLLBACK` são sempre integrais.
 
 ## Verificações de qualidade
 
+Os testes de integração usam PostgreSQL e LocalStack reais. Inicie ambos com
+`docker compose up -d postgres localstack` e configure as variáveis da
+`.env.example` antes de executar a suíte.
+
 ```bash
 bun run format:check
 bun run lint
@@ -127,8 +137,39 @@ bun run build
 docker compose config --quiet
 ```
 
-Os testes de integração exigem o PostgreSQL ativo e criam schemas isolados que
+Os testes de integração criam schemas isolados no PostgreSQL que
 são removidos ao final da execução.
+
+## Consultas e reconciliação
+
+```http
+GET /wallets/:walletId
+GET /wallets/:walletId/ledger?limit=50
+GET /wagering/transactions/:transactionId
+GET /providers/:providerId/wagering/transactions/:externalTransactionId
+POST /wallets/:walletId/reconciliation
+GET /metrics
+```
+
+O ledger retorna `{ "items": [...], "nextCursor": "..." }`. Envie `nextCursor`
+como parâmetro `cursor` até receber `null`. O limite padrão é 50, máximo 100.
+O cursor é opaco, vinculado à wallet e percorre o conjunto delimitado na primeira
+página; novas movimentações aparecem ao iniciar outra consulta sem cursor.
+
+A consulta de uma transação retorna seu estado atual e o saldo observado no seu
+processamento. Esse saldo pode diferir do saldo atual da wallet. Transações
+internas `OPENING` também podem ser consultadas pelo ID.
+
+A reconciliação retorna `storedBalance`, `calculatedBalance`, `difference`,
+`consistent` e `checkedEntries`. A diferença é saldo armazenado menos saldo do
+ledger e pode ser negativa. Uma divergência retorna `200` com `consistent: false`,
+gera log sem valores financeiros e incrementa uma métrica; nunca altera os dados.
+O header opcional `X-Correlation-Id` permite identificar esse diagnóstico.
+
+Recursos ausentes retornam `404`, parâmetros inválidos `400` e falhas transitórias
+reconhecidas do PostgreSQL `503` com `INFRASTRUCTURE_UNAVAILABLE`. Nos comandos,
+um reenvio deve preservar `Idempotency-Key`. As métricas de reconciliação estão
+em formato Prometheus, por processo; os demais indicadores operacionais são futuros.
 
 ## Documentação
 

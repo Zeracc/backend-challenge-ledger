@@ -182,9 +182,27 @@ mesma transação. Operações sem efeito no saldo não produzirão lançamentos
 linhas do ledger serão somente de inclusão: o schema rejeitará atualizações e
 exclusões, sem depender apenas de uma convenção da aplicação.
 
-A reconciliação comparará o saldo materializado da wallet com uma reconstrução
-consistente a partir do ledger. Uma divergência nunca será corrigida de maneira
-silenciosa.
+A reconciliação usa uma única consulta SQL que agrega créditos menos débitos e
+compara com o saldo materializado. O snapshot da instrução garante consistência
+durante commits concorrentes. A diferença é `storedBalance - calculatedBalance`,
+calculada em NUMERIC e serializada como string, inclusive quando negativa. Não há
+reparo automático. Divergências geram log com correlação e wallet, sem saldos, e
+contador exportado em `/metrics`.
+
+As leituras usam `WalletReadRepository`, separada do processador financeiro. A
+API de ledger utiliza keyset por sequência bigint gerada no PostgreSQL e índice
+único `(wallet_id, sequence)`. A primeira página fixa um teto em REPEATABLE READ;
+as próximas mantêm esse teto, evitando incluir movimentações novas ou repetir
+entradas. A serialização das escritas por wallet garante que novas sequências
+daquela wallet sejam alocadas depois das anteriores. Timestamps não definem a
+ordem, pois podem coincidir ou ter sido capturados antes da espera pelo lock.
+
+A migration adiciona a identidade sem reescrever campos financeiros. Para dados
+anteriores, a sequência estabelece uma ordem estável de paginação, sem prometer
+reconstruir ordem histórica de commits. Reverter e reaplicar essa migration exige
+reiniciar a paginação. O cursor Base64URL é versionado e validado por wallet e
+intervalo; não é uma credencial nem é assinado. Os controles de identidade futura
+devem ser aplicados pelo guard em todas as páginas.
 
 ## Mensageria e outbox transacional
 
@@ -207,10 +225,33 @@ como `PENDING_REFERENCE`, junto ao evento
 `WagerTransactionPendingReference` na outbox. O HTTP distingue essa aceitação
 assíncrona com status `202`, e o replay devolve o mesmo resultado persistido.
 
-O worker agendado de reprocessamento pertence à próxima fase. Ele fará novas
-tentativas com backoff exponencial limitado; tentativas e TTL serão configurações
-explícitas. Ao esgotá-los, a transação será rejeitada de forma auditável, com
-`failureCode` estável e o evento correspondente na outbox.
+O worker executa a cada cinco segundos e mantém tentativas, próxima execução e
+TTL no banco. A política usa oito tentativas, espera inicial de cinco segundos,
+teto de cinco minutos e TTL de 24 horas. O limite de tentativas normalmente
+encerra a pendência antes do TTL; 24 horas é um limite adicional, não uma promessa
+de manter a pendência durante esse período.
+
+Cada item bloqueia a transação pendente e sua wallet. O lote ordena candidatos por
+próxima tentativa e ID, tenta os demais itens mesmo quando um falha, e reporta a
+falha agregada ao scheduler. ROLLBACK rejeitado por saldo é contado como rejeição.
+O scheduler registra falhas sem SQL/payload, impede sobreposição local e aguarda
+o trabalho em andamento ao encerrar. A coordenação entre instâncias continua no
+PostgreSQL, com locks bloqueantes; reserva por SKIP LOCKED permanece uma otimização
+futura. O limite de cada lote é 100.
+
+## Readiness e diagnóstico inicial
+
+Liveness verifica o processo. Readiness consulta PostgreSQL e SQS (`ListQueues`)
+em paralelo e retorna 503 se alguma verificação falha ou excede 1,5 segundo.
+O SDK SQS é abortado ao atingir o timeout. O timeout da resposta PostgreSQL não
+cancela uma eventual aquisição de conexão em andamento no driver; não implica
+que a dependência tenha sido desligada. O CI provisiona PostgreSQL e LocalStack.
+
+O bootstrap configura logs JSON. A instrumentação de reconciliação exporta
+contadores por instância sem labels de alta cardinalidade. Métricas gerais de
+transações, retries, DLQ, locks, lag de outbox e latência permanecem futuras.
+Os endpoints financeiros reconhecem erros transitórios do PostgreSQL e retornam
+503 com código estável; erros inesperados continuam distintos como 500.
 
 ## Decisão sobre autenticação
 

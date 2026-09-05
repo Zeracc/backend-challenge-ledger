@@ -27,6 +27,7 @@
     "typecheck": "tsc --noEmit --project tsconfig.json"
   },
   "dependencies": {
+    "@aws-sdk/client-sqs": "^3.1127.0",
     "@mikro-orm/core": "7.1.15",
     "@mikro-orm/decorators": "7.1.15",
     "@mikro-orm/migrations": "7.1.15",
