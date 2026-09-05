@@ -12,6 +12,7 @@ export interface ProcessWagerTransactionCommand {
   rejectedEventId: string;
   balanceChangedEventId: string;
   occurredAt: Date;
+  referenceExpiresAt: Date;
 }
 
 export interface ProcessWagerTransactionResult {
@@ -26,4 +27,25 @@ export interface WagerTransactionProcessor {
   processAtomically(
     command: ProcessWagerTransactionCommand,
   ): Promise<ProcessWagerTransactionResult>;
+}
+
+export interface ReprocessPendingReferencesCommand {
+  occurredAt: Date;
+  batchSize: number;
+  maximumAttempts: number;
+  baseDelayMs: number;
+  maximumDelayMs: number;
+}
+
+export interface ReprocessPendingReferencesResult {
+  scanned: number;
+  processed: number;
+  rejected: number;
+  rescheduled: number;
+}
+
+export interface PendingReferenceProcessor {
+  reprocessDue(
+    command: ReprocessPendingReferencesCommand,
+  ): Promise<ReprocessPendingReferencesResult>;
 }

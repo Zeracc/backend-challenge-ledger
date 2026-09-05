@@ -31,6 +31,9 @@ export interface TransactionRow {
   failureCode?: string;
   referenceExternalTransactionId?: string;
   referenceTransactionId?: string;
+  referenceAttempts?: number;
+  nextReferenceAttemptAt?: Date;
+  referenceExpiresAt?: Date;
 }
 
 export interface LedgerRow {
@@ -179,7 +182,7 @@ export class WagerTestContext {
     transactionId: string,
   ): Promise<TransactionRow | undefined> {
     const rows = await this.connection().execute<TransactionRow[]>(
-      `select "kind", "status", "result_balance" as "resultBalance", "failure_code" as "failureCode", "reference_external_transaction_id" as "referenceExternalTransactionId", "reference_transaction_id" as "referenceTransactionId" from "${this.schemaName}"."wager_transactions" where "id" = ?`,
+      `select "kind", "status", "result_balance" as "resultBalance", "failure_code" as "failureCode", "reference_external_transaction_id" as "referenceExternalTransactionId", "reference_transaction_id" as "referenceTransactionId", "reference_attempts" as "referenceAttempts", "next_reference_attempt_at" as "nextReferenceAttemptAt", "reference_expires_at" as "referenceExpiresAt" from "${this.schemaName}"."wager_transactions" where "id" = ?`,
       [transactionId],
     );
 

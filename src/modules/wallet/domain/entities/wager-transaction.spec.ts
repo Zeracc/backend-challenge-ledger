@@ -263,7 +263,11 @@ describe('WagerTransaction referências e reversões', () => {
     });
     const balance = Money.from({ amount: '75.00', currency: 'BRL' });
 
-    transaction.markPendingReference(balance);
+    transaction.markPendingReference(
+      balance,
+      createdAt,
+      new Date('2026-09-05T12:00:00.000Z'),
+    );
 
     expect(transaction.status).toBe(WagerTransactionStatus.PendingReference);
     expect(transaction.resultBalance?.equals(balance)).toBe(true);
