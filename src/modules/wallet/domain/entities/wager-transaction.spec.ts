@@ -95,6 +95,22 @@ describe('WagerTransaction.createBet', () => {
     expect(transaction.matchesPayload('b'.repeat(64))).toBe(false);
   });
 
+  it('encerra falha técnica sem efeito financeiro e impede novas transições', () => {
+    const transaction = createBet();
+    transaction.fail(Money.from({ amount: '100.00', currency: 'BRL' }));
+    expect(transaction.status).toBe(WagerTransactionStatus.Failed);
+    expect(transaction.failureCode).toBe(
+      WagerFailureCode.ProcessingAttemptsExhausted,
+    );
+    expect(transaction.isTerminal()).toBe(true);
+    expect(() =>
+      transaction.markProcessed(Money.zero('BRL'), createdAt),
+    ).toThrow(InvalidTransactionStateError);
+    expect(() => transaction.fail(Money.zero('BRL'))).toThrow(
+      InvalidTransactionStateError,
+    );
+  });
+
   it('marca a aposta como processada com o saldo observado', () => {
     const transaction = createBet();
     const processedAt = new Date('2026-09-04T12:01:00.000Z');

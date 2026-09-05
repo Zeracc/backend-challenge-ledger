@@ -23,6 +23,7 @@ export enum WagerTransactionStatus {
 }
 
 export enum WagerFailureCode {
+  ProcessingAttemptsExhausted = 'PROCESSING_ATTEMPTS_EXHAUSTED',
   InsufficientFunds = 'INSUFFICIENT_FUNDS',
   ReferenceScopeMismatch = 'REFERENCE_SCOPE_MISMATCH',
   InvalidReferenceKind = 'INVALID_REFERENCE_KIND',
@@ -269,6 +270,15 @@ export class WagerTransaction {
     this.currentFailureCode = code;
     this.currentResultBalance = balance;
     this.currentReferenceTransactionId = referenceTransactionId;
+    this.clearReferenceSchedule();
+  }
+
+  public fail(balance: Money): void {
+    this.assertNotTerminal();
+    this.assertResultCurrency(balance);
+    this.currentStatus = WagerTransactionStatus.Failed;
+    this.currentFailureCode = WagerFailureCode.ProcessingAttemptsExhausted;
+    this.currentResultBalance = balance;
     this.clearReferenceSchedule();
   }
 

@@ -2,9 +2,8 @@
 
 ## Status
 
-Este documento registra a arquitetura planejada e evoluirá junto com o código.
-As decisões descritas aqui estabelecem restrições para a implementação; elas não
-significam que uma funcionalidade já esteja concluída.
+Este documento descreve a implementação entregue, suas garantias verificadas e
+seus limites operacionais. O README contém os comandos para reprodução.
 
 ## Prioridades
 
@@ -42,19 +41,19 @@ A raiz de composição do NestJS conecta essas fronteiras
 
 ## Representação financeira
 
-Os valores monetários nos contratos da aplicação e dos transportes serão strings
-decimais com escala fixa. A aritmética de domínio utilizará `decimal.js`; o tipo
-`number` do JavaScript é proibido para valores monetários. O PostgreSQL armazenará
+Os valores monetários nos contratos da aplicação e dos transportes são strings
+decimais com escala fixa. A aritmética de domínio utiliza `decimal.js`; o tipo
+`number` do JavaScript é proibido para valores monetários. O PostgreSQL armazena
 os valores em colunas exatas `NUMERIC(..., 2)`, acompanhadas das constraints
-adequadas. A precisão inicial será `NUMERIC(20, 2)`, permitindo até 18 dígitos
-inteiros. O mapeamento do ORM deverá converter os valores por meio de strings,
+adequadas. A precisão é `NUMERIC(20, 2)`, permitindo até 18 dígitos
+inteiros. O mapeamento do ORM converte os valores por meio de strings,
 nunca por um valor de ponto flutuante.
 
 ## Estratégia de transação e concorrência
 
-O banco de dados é a fonte da verdade. Cada comando financeiro será executado em
+O banco de dados é a fonte da verdade. Cada comando financeiro é executado em
 uma única transação SQL e coordenado pelo seu `walletId` por meio de lock de linha
-no PostgreSQL. Conforme a origem e o efeito do comando, a transação incluirá:
+no PostgreSQL. Conforme a origem e o efeito do comando, a transação inclui:
 
 - consulta e inserção da idempotência persistente;
 - registro de inbox para entradas recebidas pelo SQS;
@@ -63,14 +62,14 @@ no PostgreSQL. Conforme a origem e o efeito do comando, a transação incluirá:
 - inclusão imutável no ledger;
 - inclusão do evento na outbox.
 
-Não haverá lock de wallet local ao processo nem lock global. Wallets diferentes
-continuarão livres para progredir em paralelo. Constraints no banco de dados serão
+Não há lock de wallet local ao processo nem lock global. Wallets diferentes
+continuam livres para progredir em paralelo. Constraints no banco de dados são
 a última linha de defesa para unicidade, saldo não negativo e, no máximo, um
 efeito no ledger por transação.
 
 O lock pessimista por wallet é a escolha inicial porque torna explícito o ponto
 de serialização financeira e é naturalmente compartilhado por todas as instâncias
-da aplicação. A contenção dos locks será medida. Retentativas limitadas serão
+da aplicação. A contenção dos locks é medida. Retentativas limitadas são
 reservadas para falhas transitórias do banco, nunca para rejeições de negócio.
 
 ## Abertura de wallet
@@ -162,7 +161,7 @@ referência.
 ## Idempotência
 
 O header `Idempotency-Key` representa a identidade de um comando HTTP. Para o
-SQS, será acrescentada a identidade persistente de inbox
+SQS, é acrescentada a identidade persistente de inbox
 `(consumerName, messageId)`. No fluxo HTTP implementado, o subconjunto canônico
 dos campos de negócio é transformado em hash e persistido:
 
@@ -171,15 +170,15 @@ dos campos de negócio é transformado em hash e persistido:
 - duplicatas concorrentes: resolver pela unicidade do banco, nunca pela memória
   do processo.
 
-A resposta original incluirá o saldo observado quando o comando foi concluído.
-Um replay deverá devolver esse saldo histórico, e não o saldo mais recente da
+A resposta original inclui o saldo observado quando o comando foi concluído.
+Um replay devolve esse saldo histórico, e não o saldo mais recente da
 wallet.
 
 ## Ledger e reconciliação
 
-Cada alteração de saldo produzirá exatamente uma entrada no ledger dentro da
-mesma transação. Operações sem efeito no saldo não produzirão lançamentos. As
-linhas do ledger serão somente de inclusão: o schema rejeitará atualizações e
+Cada alteração de saldo produz exatamente uma entrada no ledger dentro da
+mesma transação. Operações sem efeito no saldo não produzem lançamentos. As
+linhas do ledger são somente de inclusão: o schema rejeita atualizações e
 exclusões, sem depender apenas de uma convenção da aplicação.
 
 A reconciliação usa uma única consulta SQL que agrega créditos menos débitos e
@@ -293,9 +292,25 @@ Uma rejeição de negócio persistida recebe ack. Mensagens inválidas, conflito
 payload/identidade, wallet ausente ou identidade incompatível seguem para DLQ.
 Erros não classificados recebem retry com backoff limitado; na quinta entrega,
 o consumidor envia à DLQ e somente então remove a origem. A DLQ mantém o corpo
-original e atributos `failureCode`/`originalMessageId`. Falhas técnicas revertidas
-não criam uma transação financeira `FAILED` artificial: o diagnóstico fica na
-DLQ, e uma política operacional de redrive permanece futura.
+original e atributos `failureCode`/`originalMessageId`. Ao esgotar as tentativas
+de um comando válido, o consumidor tenta persistir `FAILED`, o saldo observado,
+a Inbox e `WagerTransactionFailed` na Outbox atomicamente, sem movimentar dinheiro.
+O mesmo lock e a mesma idempotência protegem essa decisão: um resultado já
+confirmado vence a disputa e nunca é sobrescrito. Replay HTTP de FAILED retorna
+424; replay SQS volta à DLQ sem novo efeito. Se o banco também impedir o registro
+terminal, o corpo e o diagnóstico são preservados na DLQ antes do ack; não se
+declara um registro SQL inexistente. Redrive exige decisão operacional explícita.
+
+### Estados terminais e moedas
+
+`PROCESSED`, `REJECTED` e `FAILED` são imutáveis no domínio e por trigger SQL.
+`PENDING_REFERENCE` continua sob responsabilidade do scheduler; a exaustão de
+transporte não substitui um resultado idempotente já persistido. A transição
+para FAILED não cria ledger nem altera saldo ou versão da wallet.
+
+Money aceita BRL, USD e EUR, sempre com duas casas decimais. Uma constraint na
+wallet reforça a lista; as chaves estrangeiras compostas preservam a moeda nos
+registros financeiros relacionados. Não há conversão cambial.
 
 O heartbeat renova a visibilidade e termina antes do ack ou mudança de destino.
 O shutdown aborta o long polling e aguarda o processamento ativo. O timeout HTTP
@@ -341,7 +356,8 @@ incluem walletVersion para descartar snapshots antigos.
 Comprovações: transação financeira aberta não publica; commit torna eventos
 visíveis; três processos publicam 60 eventos; SIGKILL após reserva e após envio
 permite retomada; dono antigo não altera lease novo; falha de envio persiste
-retry; todos os quatro tipos chegam ao SQS; shutdown drena apenas o envio ativo.
+retry; os eventos financeiros e o evento terminal FAILED chegam ao SQS;
+shutdown drena apenas o envio ativo.
 A política de retenção/arquivamento de eventos publicados permanece operacional
 e não exclui registros automaticamente nesta implementação.
 
@@ -352,14 +368,15 @@ endpoints de negócio usam inicialmente um `NoOpAuthGuard`, deixando explícito 
 ponto de substituição. Em produção, esse guard delegaria a validação a um provedor
 OIDC externo, como Keycloak ou Zitadel.
 
-Os endpoints de health permanecerão públicos. O SQS será tratado como canal
-interno confiável, mas a identidade do provedor contida em cada mensagem continuará
+Os endpoints de health permanecem públicos. O SQS é tratado como canal
+interno confiável, mas a identidade do provedor contida em cada mensagem continua
 sujeita às validações de domínio.
 
 ## Estratégia de verificação
 
-Testes unitários cobrirão as regras puras de domínio. Testes de integração e de
-recuperação de falhas utilizarão containers reais de PostgreSQL e SQS compatível.
-Os testes de concorrência executarão trabalho realmente paralelo em pelo menos
-três processos da aplicação. Todo teste financeiro terminará verificando que o
-saldo armazenado na wallet é igual ao saldo reconstruído a partir do ledger.
+Testes unitários verificam as regras puras de domínio. Testes de integração e de
+recuperação usam PostgreSQL e LocalStack reais. Concorrência financeira, consumo
+SQS e publicação da Outbox são exercitados em três processos. O scheduler também
+é interrompido com SIGKILL após persistir uma tentativa e retomado por três
+processos com timers reais: somente um aplica a referência. Reconciliação após
+esses cenários compara saldo armazenado e ledger, sem reparo automático.

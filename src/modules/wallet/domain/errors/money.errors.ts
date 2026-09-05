@@ -12,7 +12,7 @@ export class InvalidCurrencyError extends Error {
   public readonly code = 'INVALID_CURRENCY';
 
   public constructor() {
-    super('A moeda deve usar o formato ISO-4217 com três letras maiúsculas.');
+    super('Moeda não suportada. Use BRL, USD ou EUR em letras maiúsculas.');
   }
 }
 

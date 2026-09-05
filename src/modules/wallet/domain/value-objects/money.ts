@@ -20,7 +20,7 @@ const MoneyDecimal = Decimal.clone({
 });
 
 const CANONICAL_AMOUNT_PATTERN = /^(?:0|[1-9]\d{0,17})\.\d{2}$/;
-const ISO_4217_CURRENCY_PATTERN = /^[A-Z]{3}$/;
+const SUPPORTED_CURRENCIES = new Set(['BRL', 'USD', 'EUR']);
 const MAXIMUM_ABSOLUTE_AMOUNT = new MoneyDecimal('999999999999999999.99');
 
 /**
@@ -119,7 +119,7 @@ export class Money {
   }
 
   private static assertValidCurrency(currency: string): void {
-    if (!ISO_4217_CURRENCY_PATTERN.test(currency)) {
+    if (!SUPPORTED_CURRENCIES.has(currency)) {
       throw new InvalidCurrencyError();
     }
   }
