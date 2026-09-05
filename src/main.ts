@@ -1,13 +1,15 @@
 import 'reflect-metadata';
 
-import { ConsoleLogger, Logger } from '@nestjs/common';
+import { Logger } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 
 import { AppModule } from './app.module.js';
+import { SafeConsoleLogger } from './shared/infrastructure/logging/safe-console-logger.js';
 
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create(AppModule, {
-    logger: new ConsoleLogger({ json: true }),
+    logger: new SafeConsoleLogger({ json: true }),
+    abortOnError: false,
   });
   app.enableShutdownHooks();
 
@@ -15,7 +17,7 @@ async function bootstrap(): Promise<void> {
   await app.listen(port, '0.0.0.0');
 }
 
-void bootstrap().catch((error: unknown) => {
-  Logger.error(error, undefined, 'Bootstrap');
+void bootstrap().catch(() => {
+  Logger.error({ event: 'bootstrap_failed' });
   process.exitCode = 1;
 });

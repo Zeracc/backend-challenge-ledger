@@ -336,6 +336,30 @@ mesmo comando com os mesmos IDs/chave, considerando que ele poderá ser aplicado
 - Readiness mede alcance das dependências, não verifica permissões de todas as operações nem todas as filas.
 - Contadores são best effort por processo; reconciliação e ledger são a fonte auditável.
 
+## Segurança e logs
+
+O Compose publica as portas somente em `127.0.0.1`; as credenciais padrão são
+exclusivas do ambiente local. A imagem da API executa como usuário `bun`.
+Não exponha a API diretamente à Internet: o guard não autentica nem autoriza
+acesso às wallets, não há rate limiting e o HTTP local não usa TLS.
+
+Logs operacionais incluem IDs de correlação, mensagem, transação, wallet e
+provedor; não incluem saldo, valor, corpo HTTP/SQS, Authorization ou credenciais.
+Esses IDs ainda exigem controle de acesso e retenção adequada. Não envie dados
+pessoais ou segredos nos campos de identificadores.
+
+Erros de inicialização são sanitizados pelo logger, inclusive os emitidos pelo
+framework antes do catch do bootstrap. Debug SQL do ORM fica desabilitado.
+PostgreSQL local e CI suprimem mensagens abaixo de FATAL, instruções SQL de erro,
+detalhes e parâmetros: erros do banco podem conter o próprio valor rejeitado.
+Isso reduz diagnóstico bruto; códigos e eventos seguros continuam na aplicação.
+Não habilite debug/SQL logging com dados reais. Logs antigos gerados antes desta
+configuração não se tornam sanitizados retroativamente.
+
+Inbox, Outbox e DLQ contêm dados de negócio por definição; são armazenamento
+auditável, não logs. Em implantação real precisam de acesso restrito, criptografia,
+retenção e gestão de segredos, além da substituição do NoOpAuthGuard.
+
 ## Fluxo de entrega
 
 `main` é a referência de entrega. As features são revisadas por PR e integradas
