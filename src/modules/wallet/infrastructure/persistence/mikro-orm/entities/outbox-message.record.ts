@@ -1,6 +1,7 @@
 import { Entity, PrimaryKey, Property } from '@mikro-orm/decorators/legacy';
 
 import type { IntegrationEvent } from '../../../../../../shared/domain/events/integration-event.js';
+import { OutboxMessage } from '../../../../domain/entities/outbox-message.js';
 
 @Entity({ tableName: 'outbox_messages' })
 export class OutboxMessageRecord {
@@ -38,11 +39,12 @@ export class OutboxMessageRecord {
   public leaseExpiresAt?: Date;
 
   public constructor(event: IntegrationEvent<object>) {
-    this.id = event.eventId;
-    this.aggregateId = event.aggregateId;
-    this.eventType = event.eventType;
+    const message = OutboxMessage.enqueue(event);
+    this.id = message.id;
+    this.aggregateId = message.aggregateId;
+    this.eventType = message.eventType;
     this.eventVersion = event.version;
-    this.payload = event.toJSON() as unknown as Record<string, unknown>;
-    this.occurredAt = event.occurredAt;
+    this.payload = message.payload;
+    this.occurredAt = message.occurredAt;
   }
 }

@@ -37,7 +37,7 @@ concorrente de apostas:
 - documentos de arquitetura e rastreabilidade dos critérios de aceite.
 
 O consumidor SQS usa Inbox atômica, retry limitado, DLQ e confirmação após commit.
-O publisher da outbox ainda não foi implementado.
+O publisher da Outbox usa leases no PostgreSQL, retry persistido e publicação SQS.
 A observabilidade completa também permanece pendente. Cada capacidade somente será marcada como
 concluída após a comprovação de suas garantias por testes unitários, de integração
 e de concorrência.
@@ -197,6 +197,31 @@ ativo no shutdown. A suíte verifica 50 duplicatas em três processos, queda ap�
 commit antes do ack, rollback da Inbox e financeiro, heartbeat e drenagem.
 O transporte tem entrega pelo menos uma vez; a unicidade financeira é garantida
 pelo PostgreSQL. Reprocessamento operacional da DLQ e métricas gerais são pendentes.
+
+## Publicação da Outbox
+
+No Compose, o publisher inicia com a API e publica em `wager-events.fifo`,
+separada da fila de comandos. Para executar pelo Bun, configure
+`OUTBOX_PUBLISHER_ENABLED=true`. `SQS_EVENTS_QUEUE_URL` substitui a URL padrão
+do LocalStack na execução local.
+
+Cada instância reserva um evento por vez com `FOR UPDATE SKIP LOCKED`, lease de
+30 segundos e token exclusivo. O envio acontece fora da transação financeira;
+`publishedAt` só é gravado após a confirmação do SQS e se o lease ainda pertence
+à tentativa. O scheduler roda a cada segundo, com até 20 eventos por lote.
+
+Falhas de envio persistem `attempts` e backoff de 1 segundo até 5 minutos.
+Eventos confirmados não são descartados ao atingir um número de tentativas.
+Após corrigir a dependência, o publisher retoma automaticamente os eventos devidos.
+`attempts` conta falhas registradas; uma queda abrupta é recuperada pela expiração
+do lease, sem necessariamente incrementar esse contador.
+
+O transporte oferece entrega **pelo menos uma vez**: se houver queda após o envio
+e antes da marcação no banco, o mesmo `eventId` pode ser enviado novamente.
+Consumidores devem deduplicar esse ID persistentemente na mesma transação dos
+seus efeitos. A deduplicação FIFO tem janela limitada e não substitui essa regra.
+A ordem financeira global não é garantida pelo publisher; consumidores de saldo
+devem considerar `walletVersion` para não aplicar um snapshot antigo.
 
 ## Documentação
 

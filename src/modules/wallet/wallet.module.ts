@@ -25,6 +25,8 @@ import { ReconciliationTelemetry } from './infrastructure/observability/reconcil
 import { InboxMessageRecord } from './infrastructure/persistence/mikro-orm/entities/inbox-message.record.js';
 import { sqsConsumerProvider } from './infrastructure/messaging/sqs-consumer.provider.js';
 import { SqsConsumerRunner } from './infrastructure/messaging/sqs-consumer.runner.js';
+import { outboxProviders } from './infrastructure/messaging/outbox.providers.js';
+import { OutboxScheduler } from './infrastructure/scheduling/outbox.scheduler.js';
 
 const openWalletProvider: Provider = {
   provide: OpenWalletUseCase,
@@ -73,6 +75,8 @@ const reprocessPendingReferencesProvider: Provider = {
   ],
   controllers: [WalletController, WageringController, WalletQueriesController],
   providers: [
+    ...outboxProviders,
+    OutboxScheduler,
     sqsConsumerProvider,
     SqsConsumerRunner,
     openWalletProvider,
